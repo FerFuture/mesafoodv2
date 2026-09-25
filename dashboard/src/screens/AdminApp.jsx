@@ -42,6 +42,7 @@ import {
 import DashboardUsersPanel from "./DashboardUsersPanel";
 import MaestroPanel from "./MaestroPanel";
 import MesaQrLinksPanel from "../components/MesaQrLinksPanel";
+import { setMesaQrLive } from "../lib/mesaQrLive";
 import StockManagerPanel from "../components/StockManagerPanel";
 import OrdersDateRangeCalendar from "../components/OrdersDateRangeCalendar";
 import { fetchRestaurantForDashboard } from "../lib/restaurantTenant";
@@ -1131,6 +1132,12 @@ export default function AdminApp({ onLogout }) {
     setOrders((prev) =>
       prev.map((row) => (row.id === order.id ? { ...row, ...updatedRow } : row))
     );
+    if (orderIsTableService(order)) {
+      const table = Number(tableNumberLabel(order));
+      if (Number.isFinite(table) && table >= 1) {
+        await setMesaQrLive(supabase, restaurantId, table, false);
+      }
+    }
     setSavingOrderId(null);
   }
 
@@ -1173,6 +1180,17 @@ export default function AdminApp({ onLogout }) {
     }
     const byId = new Map(updatedRows.map((row) => [row.id, row]));
     setOrders((prev) => prev.map((row) => (byId.has(row.id) ? { ...row, ...byId.get(row.id) } : row)));
+    const tables = [
+      ...new Set(
+        accountOrders
+          .filter((row) => orderIsTableService(row))
+          .map((row) => Number(tableNumberLabel(row)))
+          .filter((table) => Number.isFinite(table) && table >= 1)
+      )
+    ];
+    for (const table of tables) {
+      await setMesaQrLive(supabase, restaurantId, table, false);
+    }
     setSavingOrderId(null);
   }
 
@@ -1270,6 +1288,12 @@ export default function AdminApp({ onLogout }) {
     setOrders((prev) =>
       prev.map((row) => (row.id === order.id ? { ...row, ...updatedRow } : row))
     );
+    if (orderIsTableService(order)) {
+      const table = Number(tableNumberLabel(order));
+      if (Number.isFinite(table) && table >= 1) {
+        await setMesaQrLive(supabase, restaurantId, table, true);
+      }
+    }
     setSavingOrderId(null);
   }
 

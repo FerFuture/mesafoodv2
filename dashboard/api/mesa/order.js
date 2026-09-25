@@ -70,7 +70,7 @@ function visitTokenMatches(secret, restaurantId, tableNumber, openedAt, token) {
   return crypto.timingSafeEqual(a, b);
 }
 
-async function supabaseFetch(path, { method = "GET", body } = {}) {
+export async function supabaseFetch(path, { method = "GET", body } = {}) {
   const { url, key } = supabaseConfig();
   if (!url || !key) {
     const error = new Error("Faltan SUPABASE_URL y la clave en el proyecto de Vercel.");
@@ -192,6 +192,15 @@ export default async function handler(req, res) {
         : {};
     if (metadata.mesa_qr_enabled === false) {
       return res.status(409).json({ error: "Carta QR por mesas deshabilitada" });
+    }
+    const liveTables = Array.isArray(metadata.mesa_qr_live_tables)
+      ? metadata.mesa_qr_live_tables.map((entry) => Number(entry))
+      : [];
+    if (!liveTables.includes(tableNumber)) {
+      return res.status(409).json({
+        error: "Esta mesa no está habilitada. Pedile al mozo que la habilite para pedir desde el celular.",
+        code: "table_locked"
+      });
     }
     const maxTables = Number(restaurant.table_count);
     if (Number.isFinite(maxTables) && maxTables > 0 && tableNumber > maxTables) {

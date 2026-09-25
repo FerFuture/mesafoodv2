@@ -3,7 +3,7 @@
  * Si la mesa se cobra después, esa visita ya no puede pedir.
  */
 
-import { envFirst, getRawBody, signVisitToken, tokenMatches } from "./order.js";
+import { envFirst, getRawBody, signVisitToken, supabaseFetch, tokenMatches } from "./order.js";
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -40,9 +40,27 @@ export default async function handler(req, res) {
     }
 
     const openedAt = new Date().toISOString();
+    let qrOpen = false;
+    try {
+      const restaurants = await supabaseFetch(
+        `restaurants?id=eq.${encodeURIComponent(restaurantId)}&select=metadata&limit=1`
+      );
+      const restaurant = Array.isArray(restaurants) ? restaurants[0] : null;
+      const metadata =
+        restaurant?.metadata && typeof restaurant.metadata === "object" && !Array.isArray(restaurant.metadata)
+          ? restaurant.metadata
+          : {};
+      const liveTables = Array.isArray(metadata.mesa_qr_live_tables)
+        ? metadata.mesa_qr_live_tables.map((entry) => Number(entry))
+        : [];
+      qrOpen = liveTables.includes(tableNumber);
+    } catch {
+      qrOpen = false;
+    }
     return res.status(200).json({
       openedAt,
-      visitToken: signVisitToken(secret, restaurantId, tableNumber, openedAt)
+      visitToken: signVisitToken(secret, restaurantId, tableNumber, openedAt),
+      qrOpen
     });
   } catch (error) {
     const status = Number(error?.status) || 500;

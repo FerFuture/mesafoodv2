@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabaseClient";
 import { getSession } from "../lib/auth";
 import { fetchRestaurantForDashboard } from "../lib/restaurantTenant";
+import { liveMesaTables, setMesaQrLive } from "../lib/mesaQrLive";
 import {
   currency,
   formatDateTime,
@@ -120,6 +121,8 @@ export default function WaiterApp({ onLogout }) {
   const [error, setError] = useState("");
   const [tab, setTab] = useState("order");
   const [tableCount, setTableCount] = useState(12);
+  const [liveTables, setLiveTables] = useState([]);
+  const [savingQrTable, setSavingQrTable] = useState(null);
   const [selectedMesa, setSelectedMesa] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
   const confirmResolverRef = useRef(null);
@@ -175,6 +178,7 @@ export default function WaiterApp({ onLogout }) {
           ? data.metadata
           : {};
       setWaiterFulfillmentSelectorEnabled(metadataObj.waiter_fulfillment_selector_enabled === true);
+      setLiveTables(liveMesaTables(metadataObj));
     }
     loadRestaurant();
   }, []);
@@ -444,6 +448,8 @@ export default function WaiterApp({ onLogout }) {
             normalizeOrderStatus(row) !== "cancelled" &&
             !paymentIsApproved(row)
         );
+        const liveResult = await setMesaQrLive(supabase, restaurantId, tableNum, true);
+        if (!liveResult.error) setLiveTables(liveMesaTables(liveResult.metadata));
         setSelectedMesa(Number(tableNum));
         setTab("mesas");
         setToast(
@@ -636,8 +642,26 @@ export default function WaiterApp({ onLogout }) {
 
     const byId = new Map(updatedRows.map((row) => [row.id, row]));
     setOrders((prev) => prev.map((row) => (byId.has(row.id) ? { ...row, ...byId.get(row.id) } : row)));
+    if (orderIsTableService(order) && Number.isFinite(mesa)) {
+      const liveResult = await setMesaQrLive(supabase, restaurantId, mesa, false);
+      if (!liveResult.error) setLiveTables(liveMesaTables(liveResult.metadata));
+    }
     setSavingOrderId(null);
     setToast("Pago en efectivo confirmado");
+  }
+
+  async function toggleTableQr(tableNum, live) {
+    if (!restaurantId || savingQrTable) return;
+    setSavingQrTable(tableNum);
+    setError("");
+    const { error: liveError, metadata } = await setMesaQrLive(supabase, restaurantId, tableNum, live);
+    setSavingQrTable(null);
+    if (liveError) {
+      setError(`No se pudo actualizar el QR de la mesa: ${liveError.message}`);
+      return;
+    }
+    setLiveTables(liveMesaTables(metadata));
+    setToast(live ? `Mesa ${tableNum} habilitada. Pueden pedir desde el celular.` : `QR de la mesa ${tableNum} cerrado`);
   }
 
   async function markOrderDelivered(order) {
@@ -1094,13 +1118,14 @@ export default function WaiterApp({ onLogout }) {
         ) : tab === "mesas" ? (
           <div className="space-y-4">
             <p className="text-xs text-slate-500">
-              Cada mesa tiene una cuenta. Si piden algo más, se suma ahí y cocina recibe solo lo nuevo. Al cobrar, la mesa queda libre.
+              Al tomar el pedido, el QR de esa mesa queda habilitado: si te ocupás, los clientes pueden mandar a cocina lo que se les antoje. Al cobrar, el QR se cierra.
             </p>
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
               {mesaNumbers.map((n) => {
                 const list = openOrdersByTable.get(n) || [];
                 const occupied = list.length > 0;
                 const selected = selectedMesa === n;
+                const qrOpen = liveTables.includes(n);
                 return (
                   <button
                     key={n}
@@ -1118,6 +1143,7 @@ export default function WaiterApp({ onLogout }) {
                   >
                     <p className="text-lg font-semibold tabular-nums">{n}</p>
                     <p className="text-[11px]">{occupied ? "Ocupada" : "Disponible"}</p>
+                    {qrOpen ? <p className="text-[10px] text-violet-200">QR abierto</p> : null}
                   </button>
                 );
               })}
@@ -1125,17 +1151,36 @@ export default function WaiterApp({ onLogout }) {
             {selectedMesa == null ? null : (openOrdersByTable.get(selectedMesa) || []).length === 0 ? (
               <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/20 px-4 py-4">
                 <p className="text-sm text-emerald-100">Mesa {selectedMesa} disponible.</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFulfillmentType("mesa");
-                    setTableNumber(String(selectedMesa));
-                    setTab("order");
-                  }}
-                  className="mt-3 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400"
-                >
-                  Tomar pedido
-                </button>
+                <p className="mt-1 text-xs text-slate-400">
+                  {liveTables.includes(selectedMesa)
+                    ? "El QR está abierto: pueden pedir desde el celular."
+                    : "El QR está cerrado hasta que tomes el pedido o lo habilites."}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFulfillmentType("mesa");
+                      setTableNumber(String(selectedMesa));
+                      setTab("order");
+                    }}
+                    className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400"
+                  >
+                    Tomar pedido
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingQrTable === selectedMesa}
+                    onClick={() => toggleTableQr(selectedMesa, !liveTables.includes(selectedMesa))}
+                    className="rounded-lg border border-violet-400/50 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/10 disabled:opacity-50"
+                  >
+                    {savingQrTable === selectedMesa
+                      ? "Guardando…"
+                      : liveTables.includes(selectedMesa)
+                        ? "Cerrar QR"
+                        : "Habilitar QR"}
+                  </button>
+                </div>
               </div>
             ) : (
               (() => {
@@ -1150,6 +1195,7 @@ export default function WaiterApp({ onLogout }) {
                     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                       <p className="font-semibold text-slate-100">Cuenta · Mesa {selectedMesa}</p>
                       <p className="text-xs text-slate-500">
+                        {liveTables.includes(selectedMesa) ? "QR abierto · " : "QR cerrado · "}
                         {list.length === 1 ? "1 envío a cocina" : `${list.length} envíos a cocina`}
                       </p>
                     </div>
@@ -1172,6 +1218,18 @@ export default function WaiterApp({ onLogout }) {
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 pt-3">
                       <p className="text-lg font-bold text-emerald-200">{currency(total)}</p>
                       <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={savingQrTable === selectedMesa}
+                          onClick={() => toggleTableQr(selectedMesa, !liveTables.includes(selectedMesa))}
+                          className="rounded-lg border border-violet-400/50 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/10 disabled:opacity-50"
+                        >
+                          {savingQrTable === selectedMesa
+                            ? "Guardando…"
+                            : liveTables.includes(selectedMesa)
+                              ? "Cerrar QR"
+                              : "Habilitar QR"}
+                        </button>
                         <button
                           type="button"
                           onClick={() => {

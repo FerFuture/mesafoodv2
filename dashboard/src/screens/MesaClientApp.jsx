@@ -107,6 +107,7 @@ export default function MesaClientApp() {
   const [cartById, setCartById] = useState({});
   const [observacion, setObservacion] = useState("");
   const [visit, setVisit] = useState(null);
+  const [qrOpen, setQrOpen] = useState(true);
   const [visitError, setVisitError] = useState("");
   const [accountClosed, setAccountClosed] = useState(false);
   const [toast, setToast] = useState(null);
@@ -250,6 +251,7 @@ export default function MesaClientApp() {
             openedAt: String(data?.openedAt || ""),
             visitToken: String(data?.visitToken || "")
           });
+          setQrOpen(data?.qrOpen !== false);
         }
       } catch (e) {
         if (!cancelled) setVisitError(e?.message || "No se pudo abrir la mesa");
@@ -356,12 +358,14 @@ export default function MesaClientApp() {
       const data = await res.json().catch(() => null);
       if (!res.ok) {
         if (data?.code === "visit_closed") setAccountClosed(true);
+        if (data?.code === "table_locked") setQrOpen(false);
         const msg = data?.error || `Error HTTP ${res.status}`;
         throw new Error(msg);
       }
 
       setCartById({});
       setObservacion("");
+      setQrOpen(true);
       setToast("Listo · enviado a cocina");
     } catch (e) {
       setError(`No se pudo enviar el pedido: ${e?.message || e}`);
@@ -549,6 +553,12 @@ export default function MesaClientApp() {
       </header>
 
       <main className="mx-auto max-w-3xl px-4 py-5 space-y-5">
+        {!viewOnly && !qrOpen && !accountClosed ? (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-3 text-sm text-amber-100" role="status">
+            Esta mesa no está habilitada. Pedile al mozo que la habilite y después volvé a enviar el pedido.
+          </div>
+        ) : null}
+
         {visitError && !accountClosed ? (
           <div className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-sm text-rose-200" role="alert">
             {visitError}
