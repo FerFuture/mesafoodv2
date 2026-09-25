@@ -187,24 +187,27 @@ export default async function handler(req, res) {
     }
 
     const botNumber = String(restaurant.whatsapp_number || "").replace(/\D/g, "") || "0";
+    const observacion = String(body?.observacion || "").trim().slice(0, 400);
+    const orderRow = {
+      restaurant_id: restaurantId,
+      customer_number: "",
+      bot_number: botNumber,
+      items: resolvedItems,
+      notes: `Mesa: ${tableNumber}`,
+      status: "confirmed",
+      payment_method: "efectivo_mesa",
+      payment_status: "pending",
+      payment_paid_at: null,
+      fulfillment_type: "mesa",
+      table_number: tableNumber,
+      total_price: totalAmount,
+      total_amount: totalAmount,
+      subtotal_amount: totalAmount
+    };
+    if (observacion) orderRow.observacion = observacion;
     const created = await supabaseFetch("orders", {
       method: "POST",
-      body: {
-        restaurant_id: restaurantId,
-        customer_number: "",
-        bot_number: botNumber,
-        items: resolvedItems,
-        notes: `Mesa: ${tableNumber}`,
-        status: "confirmed",
-        payment_method: "efectivo_mesa",
-        payment_status: "pending",
-        payment_paid_at: null,
-        fulfillment_type: "mesa",
-        table_number: tableNumber,
-        total_price: totalAmount,
-        total_amount: totalAmount,
-        subtotal_amount: totalAmount
-      }
+      body: orderRow
     });
     const order = Array.isArray(created) ? created[0] : created;
     return res.status(200).json({ orderId: order?.id || null });

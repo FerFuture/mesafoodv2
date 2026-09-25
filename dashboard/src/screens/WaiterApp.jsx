@@ -1165,6 +1165,7 @@ export default function WaiterApp({ onLogout }) {
                       {list.map((order, index) => (
                         <p key={order.id} className="text-xs text-slate-500">
                           {index === 0 ? "Pedido inicial" : "Agregado"} · {formatDateTime(order.created_at)}
+                          {orderObservacionText(order) ? ` · ${orderObservacionText(order)}` : ""}
                         </p>
                       ))}
                     </div>

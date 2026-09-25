@@ -104,6 +104,7 @@ export default function MesaClientApp() {
   const [error, setError] = useState("");
 
   const [cartById, setCartById] = useState({});
+  const [observacion, setObservacion] = useState("");
   const [toast, setToast] = useState(null);
   const toastTimerRef = useRef(null);
 
@@ -273,7 +274,8 @@ export default function MesaClientApp() {
         restaurantId,
         tableNumber: tableNum,
         items: cartLines,
-        mesaToken: mesaTokenFromUrl || ""
+        mesaToken: mesaTokenFromUrl || "",
+        observacion: String(observacion || "").trim()
       };
       const apiCandidates = buildMesaApiCandidates();
       let res = null;
@@ -313,6 +315,7 @@ export default function MesaClientApp() {
       }
 
       setCartById({});
+      setObservacion("");
       setToast("Listo · enviado a cocina");
     } catch (e) {
       setError(`No se pudo enviar el pedido: ${e?.message || e}`);
@@ -345,6 +348,7 @@ export default function MesaClientApp() {
       return;
     }
 
+    const observacionTrimmed = String(observacion || "").trim();
     const summaryLines = [];
     for (const [itemId, qty] of Object.entries(cartById)) {
       const item = menuById.get(itemId);
@@ -385,6 +389,12 @@ export default function MesaClientApp() {
               ))}
             </ul>
           </div>
+          {observacionTrimmed ? (
+            <p className="text-sm">
+              <span className="text-slate-500">Observación</span>{" "}
+              <span className="font-medium text-amber-100">{observacionTrimmed}</span>
+            </p>
+          ) : null}
           <p className="flex flex-wrap items-baseline justify-between gap-2 border-t border-slate-700/60 pt-2 text-sm">
             <span className="text-slate-500">Total del pedido</span>
             <span className="text-lg font-bold tabular-nums text-emerald-300">{currency(totalAmount)}</span>
@@ -564,6 +574,21 @@ export default function MesaClientApp() {
             </div>
           ))}
         </section>
+
+        <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-4">
+          <label className="block text-xs font-medium uppercase tracking-wider text-slate-400">
+            Observación <span className="normal-case tracking-normal text-slate-500">(opcional)</span>
+          </label>
+          <textarea
+            value={observacion}
+            onChange={(e) => setObservacion(e.target.value)}
+            rows={2}
+            maxLength={400}
+            disabled={submitting}
+            placeholder="Ej: sin mayonesa, sin cebolla, bien cocido…"
+            className="mt-2 w-full resize-y rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-500 focus:border-emerald-500/50 disabled:opacity-50"
+          />
+        </div>
 
         <div className="sticky bottom-0 border-t border-slate-800 bg-slate-950/95 py-4 backdrop-blur">
           <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/20 px-4 py-4">
