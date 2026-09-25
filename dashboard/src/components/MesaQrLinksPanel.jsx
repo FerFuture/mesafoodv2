@@ -278,9 +278,8 @@ export default function MesaQrLinksPanel({
 
       {!secret ? (
         <p className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
-          Falta secreto: para usar pedido por QR sin que puedan cambiar de mesa, tenés que configurar{" "}
-          <code className="text-[11px]">MESA_QR_SECRET</code> en el servidor y{" "}
-          <code className="text-[11px]">VITE_MESA_QR_SECRET</code> (mismo valor) en el build del dashboard.
+          Falta secreto: en Vercel cargá <code className="text-[11px]">VITE_MESA_QR_SECRET</code> y volvé a
+          desplegar. Sin eso el QR no incluye el token de la mesa.
         </p>
       ) : (
         <p className="rounded-lg border border-emerald-500/30 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-100/95">

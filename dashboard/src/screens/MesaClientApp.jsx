@@ -97,9 +97,6 @@ export default function MesaClientApp() {
   const [blockedTables, setBlockedTables] = useState([]);
 
   const [mesaEnabled, setMesaEnabled] = useState(false);
-  const [cashEnabled, setCashEnabled] = useState(false);
-  const [mpEnabled, setMpEnabled] = useState(false);
-
   const [menuItems, setMenuItems] = useState([]);
   const [menuSearchQuery, setMenuSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -107,13 +104,8 @@ export default function MesaClientApp() {
   const [error, setError] = useState("");
 
   const [cartById, setCartById] = useState({});
-  const [paymentChoice, setPaymentChoice] = useState(null); // "cash" | "mp"
-  const [paymentLink, setPaymentLink] = useState(null);
   const [toast, setToast] = useState(null);
   const toastTimerRef = useRef(null);
-
-  /** URL pública del backend (`index.js`), opcional en `restaurants.metadata.mesa_api_base_url` (sin `/api/...`). */
-  const [mesaApiBaseUrl, setMesaApiBaseUrl] = useState("");
 
   const [confirmDialog, setConfirmDialog] = useState(null);
   const confirmResolverRef = useRef(null);
@@ -156,52 +148,9 @@ export default function MesaClientApp() {
   const groupedMenu = useMemo(() => groupMenuByCategory(menuItemsFiltered), [menuItemsFiltered]);
   const mesaBlocked = parsedTableNumber != null && blockedTables.includes(parsedTableNumber);
 
-  const defaultApiBase = `${window.location.protocol}//${window.location.hostname}:3000`;
-  const configuredApiBase = String(import.meta.env.VITE_MESA_API_BASE_URL || "").trim();
-
-  function mesaApiBaseAllowedFromBrowser(baseRaw) {
-    const b = String(baseRaw || "").trim();
-    if (!b) return false;
-    if (!window.isSecureContext) return true;
-    try {
-      const u = new URL(b.includes("://") ? b : `https://${b}`);
-      if (u.protocol !== "http:") return true;
-      const h = u.hostname.toLowerCase();
-      return h === "localhost" || h === "127.0.0.1" || h === "[::1]";
-    } catch {
-      return false;
-    }
-  }
-
-  /** En Vercel no existe puerto :3000 en el mismo hostname; evita timeouts inútiles. */
-  function port3000FallbackLikelyUseless() {
-    const h = String(window.location.hostname || "").toLowerCase();
-    return h.endsWith(".vercel.app") || h.endsWith(".netlify.app");
-  }
-
   function buildMesaApiCandidates() {
-    const candidates = [];
-    const pushOrderUrl = (baseRaw) => {
-      const b = String(baseRaw || "")
-        .trim()
-        .replace(/\/$/, "");
-      if (!b || !mesaApiBaseAllowedFromBrowser(b)) return;
-      candidates.push(`${b}/api/mesa/order`);
-    };
-
     const origin = window.location.origin.replace(/\/$/, "");
-
-    // 1) Mismo origen (proxy /api/mesa/order en Vercel o backend embebido).
-    pushOrderUrl(origin);
-    pushOrderUrl(mesaApiBaseUrl);
-    pushOrderUrl(configuredApiBase);
-
-    const host3000 = `${window.location.protocol}//${window.location.hostname}:3000`;
-    if (!port3000FallbackLikelyUseless()) {
-      pushOrderUrl(host3000);
-      pushOrderUrl(defaultApiBase);
-    }
-    return [...new Set(candidates)];
+    return [`${origin}/api/mesa/order`];
   }
 
   async function fetchWithTimeout(url, options, timeoutMs = API_REQUEST_TIMEOUT_MS) {
@@ -213,13 +162,6 @@ export default function MesaClientApp() {
       window.clearTimeout(timeout);
     }
   }
-
-  const availablePaymentChoices = useMemo(() => {
-    const options = [];
-    if (cashEnabled) options.push("cash");
-    if (mpEnabled) options.push("mp");
-    return options;
-  }, [cashEnabled, mpEnabled]);
 
   useEffect(() => {
     async function run() {
@@ -241,14 +183,6 @@ export default function MesaClientApp() {
             : {};
         setMesaEnabled(metadataObj.mesa_qr_enabled !== false);
         setBlockedTables(normalizeBlockedMesaTables(metadataObj.mesa_qr_blocked_tables, Number(data.table_count) || 500));
-        setCashEnabled(data.cash_enabled !== false);
-        setMpEnabled(data.mercadopago_enabled !== false);
-
-        const metaBase =
-          typeof metadataObj.mesa_api_base_url === "string"
-            ? metadataObj.mesa_api_base_url.trim().replace(/\/$/, "")
-            : "";
-        setMesaApiBaseUrl(metaBase);
       } catch (e) {
         setError(`Error cargando restaurante: ${e?.message || e}`);
       }
@@ -283,14 +217,6 @@ export default function MesaClientApp() {
     }
     loadMenu();
   }, [restaurantId]);
-
-  useEffect(() => {
-    if (!availablePaymentChoices.length) {
-      setPaymentChoice(null);
-      return;
-    }
-    if (availablePaymentChoices.length === 1) setPaymentChoice(availablePaymentChoices[0]);
-  }, [availablePaymentChoices]);
 
   useEffect(() => {
     if (!toast) return;
@@ -341,13 +267,11 @@ export default function MesaClientApp() {
 
   async function performSubmitOrder(tableNum) {
     setError("");
-    setPaymentLink(null);
     setSubmitting(true);
     try {
       const payload = {
         restaurantId,
         tableNumber: tableNum,
-        paymentMethod: paymentChoice,
         items: cartLines,
         mesaToken: mesaTokenFromUrl || ""
       };
@@ -388,14 +312,8 @@ export default function MesaClientApp() {
         throw new Error(msg);
       }
 
-      setPaymentLink(data?.paymentLink || null);
       setCartById({});
-
-      if (paymentChoice === "mp" && data?.paymentLink) {
-        setToast("Pedido enviado. Generamos el link de Mercado Pago.");
-      } else {
-        setToast("Listo · enviado a cocina");
-      }
+      setToast("Listo · enviado a cocina");
     } catch (e) {
       setError(`No se pudo enviar el pedido: ${e?.message || e}`);
     } finally {
@@ -422,14 +340,6 @@ export default function MesaClientApp() {
       setError("Falta configuración del restaurante.");
       return;
     }
-    if (!availablePaymentChoices.length) {
-      setError("No hay medios de pago habilitados.");
-      return;
-    }
-    if (!paymentChoice) {
-      setError("Elegí un medio de pago.");
-      return;
-    }
     if (cartLines.length === 0) {
       setError("Agregá al menos un producto al pedido.");
       return;
@@ -449,13 +359,6 @@ export default function MesaClientApp() {
       });
     }
 
-    const payLabel =
-      paymentChoice === "cash"
-        ? "Efectivo en la mesa"
-        : paymentChoice === "mp"
-          ? "Mercado Pago"
-          : "—";
-
     const confirmed = await requestConfirm({
       title: "Confirmar envío a cocina",
       message: "Revisá el pedido. Si está bien, tocá enviar para mandarlo a cocina.",
@@ -467,10 +370,6 @@ export default function MesaClientApp() {
           <p className="text-sm">
             <span className="text-slate-500">Mesa</span>{" "}
             <span className="font-semibold text-white">{parsedTableNumber}</span>
-          </p>
-          <p className="text-sm">
-            <span className="text-slate-500">Pago</span>{" "}
-            <span className="font-semibold text-white">{payLabel}</span>
           </p>
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Ítems</p>
@@ -564,9 +463,6 @@ export default function MesaClientApp() {
     );
   }
 
-  const paymentOptionsTitle =
-    availablePaymentChoices.length === 1 ? "Medio de pago" : "¿Con qué querés pagar?";
-
   return (
     <div className="dark min-h-screen bg-slate-950 text-slate-100">
       <header className="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/95 backdrop-blur">
@@ -590,53 +486,6 @@ export default function MesaClientApp() {
             {error}
           </div>
         ) : null}
-
-        {availablePaymentChoices.length === 0 ? (
-          <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 text-center text-slate-300">
-            No hay medios de pago habilitados para este local.
-          </div>
-        ) : (
-          <section className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-            <h2 className="text-sm font-semibold text-slate-200">{paymentOptionsTitle}</h2>
-
-            {availablePaymentChoices.length === 2 ? (
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPaymentChoice("cash")}
-                  disabled={submitting}
-                  className={`rounded-lg px-3 py-2 text-sm font-semibold border ${
-                    paymentChoice === "cash"
-                      ? "border-emerald-500/60 bg-emerald-500/20 text-emerald-200"
-                      : "border-slate-700 bg-slate-950/40 text-slate-300 hover:bg-slate-800/50"
-                  }`}
-                >
-                  Efectivo en la mesa
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPaymentChoice("mp")}
-                  disabled={submitting}
-                  className={`rounded-lg px-3 py-2 text-sm font-semibold border ${
-                    paymentChoice === "mp"
-                      ? "border-emerald-500/60 bg-emerald-500/20 text-emerald-200"
-                      : "border-slate-700 bg-slate-950/40 text-slate-300 hover:bg-slate-800/50"
-                  }`}
-                >
-                  Mercado Pago
-                </button>
-              </div>
-            ) : (
-              <p className="text-sm text-slate-400">
-                {paymentChoice === "cash"
-                  ? "Pagás en efectivo."
-                  : paymentChoice === "mp"
-                    ? "Pagás con Mercado Pago."
-                    : "—"}
-              </p>
-            )}
-          </section>
-        )}
 
         {visibleMenuItems.length > 0 ? (
           <section className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
@@ -727,7 +576,7 @@ export default function MesaClientApp() {
               <div className="flex flex-wrap gap-2 items-center">
                 <button
                   type="button"
-                  disabled={submitting || cartLines.length === 0 || availablePaymentChoices.length === 0}
+                  disabled={submitting || cartLines.length === 0}
                   onClick={() => submitOrder()}
                   className="rounded-lg bg-emerald-500 px-6 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
                 >
@@ -736,20 +585,6 @@ export default function MesaClientApp() {
               </div>
             </div>
 
-            {paymentLink ? (
-              <div className="mt-4 rounded-lg border border-slate-700 bg-slate-950/40 p-3">
-                <p className="text-sm font-semibold text-slate-100">Mercado Pago</p>
-                <p className="mt-1 text-xs text-slate-400">Abrí el link para completar el pago.</p>
-                <a
-                  href={paymentLink}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-2 inline-block rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/20"
-                >
-                  Pagar ahora
-                </a>
-              </div>
-            ) : null}
           </div>
         </div>
       </main>

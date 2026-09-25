@@ -130,32 +130,9 @@ function normalizeRecipeRows(rows) {
   }));
 }
 
-function stockAiBaseAllowedFromBrowser(baseRaw) {
-  const raw = String(baseRaw || "").trim();
-  if (!raw) return false;
-  if (!window.isSecureContext) return true;
-  try {
-    const url = new URL(raw.includes("://") ? raw : `https://${raw}`);
-    if (url.protocol !== "http:") return true;
-    const host = url.hostname.toLowerCase();
-    return host === "localhost" || host === "127.0.0.1" || host === "[::1]";
-  } catch {
-    return false;
-  }
-}
-
 function buildStockAiCandidates() {
-  const candidates = [];
-  const pushCandidate = (baseRaw) => {
-    const base = String(baseRaw || "").trim().replace(/\/$/, "");
-    if (!base || !stockAiBaseAllowedFromBrowser(base)) return;
-    candidates.push(`${base}${STOCK_AI_PATH}`);
-  };
   const origin = window.location.origin.replace(/\/$/, "");
-  pushCandidate(origin);
-  const host3000 = `${window.location.protocol}//${window.location.hostname}:3000`;
-  pushCandidate(host3000);
-  return [...new Set(candidates)];
+  return [`${origin}${STOCK_AI_PATH}`];
 }
 
 async function fetchWithTimeout(url, options, timeoutMs = STOCK_AI_TIMEOUT_MS) {
