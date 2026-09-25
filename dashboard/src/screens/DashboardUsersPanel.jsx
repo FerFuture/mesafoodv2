@@ -50,7 +50,7 @@ function WeekdayToggle({ value, onChange, disabled }) {
   );
 }
 
-export default function DashboardUsersPanel() {
+export default function DashboardUsersPanel({ restaurantId = "" }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -66,12 +66,18 @@ export default function DashboardUsersPanel() {
 
   const loadUsers = useCallback(async () => {
     setError("");
+    if (!restaurantId) {
+      setRows([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const { data, error: qErr } = await supabase
       .from(TABLE)
       .select(
-        "id, username, role, label, is_active, delivery_work_weekdays, created_at, updated_at"
+        "id, username, role, label, is_active, delivery_work_weekdays, created_at, updated_at, restaurant_id"
       )
+      .eq("restaurant_id", restaurantId)
       .order("created_at", { ascending: false });
     setLoading(false);
     if (qErr) {
@@ -84,7 +90,7 @@ export default function DashboardUsersPanel() {
       return;
     }
     setRows(data || []);
-  }, []);
+  }, [restaurantId]);
 
   useEffect(() => {
     loadUsers();
@@ -117,8 +123,13 @@ export default function DashboardUsersPanel() {
       setError(`No se pudo cifrar la contraseña: ${e?.message || e}`);
       return;
     }
+    if (!restaurantId) {
+      setError("No hay un local asociado a esta sesión.");
+      return;
+    }
     setSavingId("__new__");
     const { error: insErr } = await supabase.from(TABLE).insert({
+      restaurant_id: restaurantId,
       username: u,
       password_hash: hash,
       role: newUser.role,
@@ -158,7 +169,8 @@ export default function DashboardUsersPanel() {
         is_active: !row.is_active,
         updated_at: new Date().toISOString()
       })
-      .eq("id", row.id);
+      .eq("id", row.id)
+      .eq("restaurant_id", restaurantId);
     setSavingId(null);
     if (upErr) {
       setError(upErr.message);
@@ -202,7 +214,11 @@ export default function DashboardUsersPanel() {
       }
     }
     setSavingId(row.id);
-    const { error: upErr } = await supabase.from(TABLE).update(patch).eq("id", row.id);
+    const { error: upErr } = await supabase
+      .from(TABLE)
+      .update(patch)
+      .eq("id", row.id)
+      .eq("restaurant_id", restaurantId);
     setSavingId(null);
     if (upErr) {
       setError(upErr.code === "23505" ? "Ese nombre de usuario ya existe." : upErr.message);
@@ -221,7 +237,7 @@ export default function DashboardUsersPanel() {
     }
     setError("");
     setSavingId(row.id);
-    const { error: delErr } = await supabase.from(TABLE).delete().eq("id", row.id);
+    const { error: delErr } = await supabase.from(TABLE).delete().eq("id", row.id).eq("restaurant_id", restaurantId);
     setSavingId(null);
     if (delErr) {
       setError(delErr.message);
@@ -235,8 +251,7 @@ export default function DashboardUsersPanel() {
       <div className="rounded-xl border border-slate-700 bg-slate-900 p-5">
         <h2 className="text-sm font-semibold text-slate-200">Usuarios del panel</h2>
         <p className="mt-1 text-xs text-slate-400">
-          Altas para admin, encargado, cocina, mozo o reparto. Para reparto, elegí los días en que puede iniciar sesión cada
-          usuario.
+          Usuarios de este local. No aparecen en los otros. Para reparto, elegí los días en que puede iniciar sesión.
         </p>
       </div>
 

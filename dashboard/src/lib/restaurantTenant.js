@@ -26,12 +26,57 @@ function rowMatchesCandidates(row, candidateSet) {
   return botNumberMatchCandidates(d).some((v) => candidateSet.has(v));
 }
 
+const RESTAURANT_COLUMNS =
+  "id, name, public_name, whatsapp_number, delivery_enabled, local_enabled, mesa_enabled, cash_enabled, mercadopago_enabled, stats_enabled, table_count, metadata, status";
+
+function restaurantIdFromUrl() {
+  if (typeof window === "undefined") return "";
+  return String(new URLSearchParams(window.location.search).get("r") || "").trim();
+}
+
+function pausedResult() {
+  return {
+    data: null,
+    error: { message: "Este local está pausado. El acceso vuelve cuando se reactive." }
+  };
+}
+
+async function fetchRestaurantById(supabase, restaurantId) {
+  const id = String(restaurantId || "").trim();
+  if (!id) return { data: null, error: null };
+  const { data, error } = await supabase
+    .from("restaurants")
+    .select(RESTAURANT_COLUMNS)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) return { data: null, error };
+  if (!data) return { data: null, error: null };
+  if (String(data.status || "active") === "paused") return pausedResult();
+  return { data, error: null };
+}
+
 /**
- * Resuelve la fila `restaurants` para el panel (anon).
- * - Con `VITE_BOT_WHATSAPP_NUMBER`: coincide con backend (.in + fallback por dígitos si la columna tiene + / espacios).
- * - Sin número: primera fila por `id` (un solo tenant).
+ * Resuelve la fila `restaurants` del panel.
+ * - Carta pública: `?r=` es el id del local.
+ * - Personal logueado: el `restaurantId` de la sesión.
+ * - Compatibilidad con el bot: `VITE_BOT_WHATSAPP_NUMBER`, si está definido.
  */
 export async function fetchRestaurantForDashboard(supabase) {
+  const fromUrl = restaurantIdFromUrl();
+  if (fromUrl) return fetchRestaurantById(supabase, fromUrl);
+
+  let sessionRestaurantId = "";
+  try {
+    const raw = localStorage.getItem("restobot_session_v1");
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed?.role && parsed.role !== "owner" && parsed.restaurantId) {
+      sessionRestaurantId = String(parsed.restaurantId);
+    }
+  } catch {
+    sessionRestaurantId = "";
+  }
+  if (sessionRestaurantId) return fetchRestaurantById(supabase, sessionRestaurantId);
+
   const configuredRaw = import.meta.env.VITE_BOT_WHATSAPP_NUMBER ?? "";
   const candidates = botNumberMatchCandidates(configuredRaw);
 
@@ -40,38 +85,30 @@ export async function fetchRestaurantForDashboard(supabase) {
 
     const { data: rowsIn, error: errIn } = await supabase
       .from("restaurants")
-      .select(
-        "id, name, whatsapp_number, delivery_enabled, local_enabled, mesa_enabled, cash_enabled, mercadopago_enabled, stats_enabled, table_count, metadata"
-      )
+      .select(RESTAURANT_COLUMNS)
       .in("whatsapp_number", candidates);
 
     if (errIn) return { data: null, error: errIn };
 
     const firstExact = (rowsIn || [])[0];
-    if (firstExact) return { data: firstExact, error: null };
+    if (firstExact) {
+      if (String(firstExact.status || "active") === "paused") return pausedResult();
+      return { data: firstExact, error: null };
+    }
 
     const { data: rowsScan, error: errScan } = await supabase
       .from("restaurants")
-      .select(
-        "id, name, whatsapp_number, delivery_enabled, local_enabled, mesa_enabled, cash_enabled, mercadopago_enabled, stats_enabled, table_count, metadata"
-      )
+      .select(RESTAURANT_COLUMNS)
       .order("id", { ascending: true })
       .limit(200);
 
     if (errScan) return { data: null, error: errScan };
 
     const fallback = (rowsScan || []).find((row) => rowMatchesCandidates(row, candidateSet));
-    return { data: fallback || null, error: null };
+    if (!fallback) return { data: null, error: null };
+    if (String(fallback.status || "active") === "paused") return pausedResult();
+    return { data: fallback, error: null };
   }
 
-  const { data, error } = await supabase
-    .from("restaurants")
-    .select(
-      "id, name, whatsapp_number, delivery_enabled, local_enabled, mesa_enabled, cash_enabled, mercadopago_enabled, stats_enabled, table_count, metadata"
-    )
-    .order("id", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  return { data: data || null, error: error || null };
+  return { data: null, error: null };
 }

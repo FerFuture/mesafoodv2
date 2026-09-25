@@ -6,9 +6,11 @@ import DeliveryApp from "./screens/DeliveryApp";
 import KitchenApp from "./screens/KitchenApp";
 import WaiterApp from "./screens/WaiterApp";
 import MesaClientApp from "./screens/MesaClientApp";
+import ControlPanel from "./screens/ControlPanel";
 import { getSession, logout, SESSION_REVALIDATE_MS, validateStoredSession } from "./lib/auth";
 
 function homePathForRole(role) {
+  if (role === "owner") return "/control";
   if (role === "admin" || role === "maestro" || role === "encargado") return "/admin";
   if (role === "delivery") return "/delivery";
   if (role === "kitchen") return "/kitchen";
@@ -25,6 +27,9 @@ function sessionInvalidationMessage(reason) {
   }
   if (reason === "user_inactive_or_deleted") {
     return "Tu usuario fue desactivado o eliminado.";
+  }
+  if (reason === "restaurant_paused") {
+    return "Este local está pausado. El acceso vuelve cuando se reactive.";
   }
   return "Tu sesión ya no es válida. Iniciá sesión nuevamente.";
 }
@@ -77,6 +82,18 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/carta" element={<MesaClientApp />} />
+      <Route
+        path="/control"
+        element={
+          !session ? (
+            <Navigate to="/login" replace />
+          ) : session.role !== "owner" ? (
+            <Navigate to={homePathForRole(session.role)} replace />
+          ) : (
+            <ControlPanel onLogout={handleLogout} username={session.username} />
+          )
+        }
+      />
       <Route
         path="/login"
         element={

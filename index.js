@@ -4249,6 +4249,10 @@ client.on("message", async (message) => {
       return;
     }
 
+    if (String(tenant.status || "active").toLowerCase() === "paused") {
+      return;
+    }
+
     if (!tenantBotWhatsappEnabled(tenant)) {
       return;
     }

@@ -65,7 +65,7 @@ export default function MesaQrLinksPanel({
     (async () => {
       const out = [];
       for (let table = 1; table <= n; table += 1) {
-        let url = `${base}/carta?mesa=${encodeURIComponent(String(table))}`;
+        let url = `${base}/carta?r=${encodeURIComponent(rid)}&mesa=${encodeURIComponent(String(table))}`;
         if (secret) {
           const tok = await signMesaTableToken(rid, table, secret);
           if (tok) url += `&t=${encodeURIComponent(tok)}`;

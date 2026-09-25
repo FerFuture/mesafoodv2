@@ -1,11 +1,29 @@
-import { useState } from "react";
-import { login } from "../lib/auth";
+import { useEffect, useState } from "react";
+import { createFirstOwner, hasPlatformOwner, login } from "../lib/auth";
 
 export default function Login({ onLoggedIn, sessionNotice = "" }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [needsOwner, setNeedsOwner] = useState(false);
+  const [checkingOwner, setCheckingOwner] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    hasPlatformOwner().then((result) => {
+      if (cancelled) return;
+      setCheckingOwner(false);
+      if (!result.ok) {
+        setError(result.error || "No se pudo consultar la cuenta de control. Corré el SQL de MesaFood v2 en Supabase.");
+        return;
+      }
+      if (!result.exists) setNeedsOwner(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const usernameTrim = username.trim();
 
@@ -14,10 +32,12 @@ export default function Login({ onLoggedIn, sessionNotice = "" }) {
     setError("");
     setSubmitting(true);
     try {
-      const result = await login({
-        password,
-        username: usernameTrim || undefined
-      });
+      const result = needsOwner
+        ? await createFirstOwner(usernameTrim, password)
+        : await login({
+            password,
+            username: usernameTrim
+          });
       if (!result.ok) {
         setError(result.error || "No se pudo iniciar sesión.");
         return;
@@ -33,8 +53,12 @@ export default function Login({ onLoggedIn, sessionNotice = "" }) {
     <div className="dark min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold tracking-tight">RestoBot</h1>
-          <p className="mt-1 text-sm text-slate-400">Usuario y contraseña, o solo contraseña de acceso</p>
+          <h1 className="text-3xl font-bold tracking-tight">MesaFood</h1>
+          <p className="mt-1 text-sm text-slate-400">
+            {needsOwner
+              ? "Creá tu usuario de control. Con esa cuenta vas a dar de alta cada local."
+              : "Entrá con tu usuario. El personal de cada local usa el suyo."}
+          </p>
         </div>
 
         <form
@@ -46,11 +70,12 @@ export default function Login({ onLoggedIn, sessionNotice = "" }) {
               htmlFor="login-username"
               className="mb-2 block text-xs font-medium uppercase tracking-wider text-slate-400"
             >
-              Usuario (opcional)
+              Usuario
             </label>
             <input
               id="login-username"
               type="text"
+              required
               autoComplete="username"
               value={username}
               onChange={(event) => {
@@ -96,10 +121,10 @@ export default function Login({ onLoggedIn, sessionNotice = "" }) {
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || checkingOwner}
             className="h-11 w-full rounded-lg bg-emerald-500 px-4 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:opacity-60"
           >
-            {submitting ? "Ingresando…" : "Ingresar"}
+            {submitting ? "Ingresando…" : needsOwner ? "Crear cuenta de control" : "Ingresar"}
           </button>
         </form>
       </div>

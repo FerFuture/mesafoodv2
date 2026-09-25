@@ -795,7 +795,7 @@ export default function AdminApp({ onLogout }) {
     if (event?.preventDefault) event.preventDefault();
     if (!restaurantId) {
       setError(
-        "No hay restaurante seleccionado. Verificá BOT_WHATSAPP_NUMBER o VITE_BOT_WHATSAPP_NUMBER (.env) para que coincida con restaurants.whatsapp_number (solo dígitos o mismo formato), o que exista al menos una fila en restaurants."
+        "No hay un local asociado a esta sesión. Entrá con el usuario de ese local."
       );
       return;
     }
@@ -3047,7 +3047,7 @@ export default function AdminApp({ onLogout }) {
             />
           </div>
         ) : activeTab === "users" ? (
-          <DashboardUsersPanel />
+          <DashboardUsersPanel restaurantId={restaurantId} />
         ) : activeTab === "maestro" && isMaestro ? (
           <MaestroPanel
             restaurantId={restaurantId}
