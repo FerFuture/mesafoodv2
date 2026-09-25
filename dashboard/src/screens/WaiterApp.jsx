@@ -8,6 +8,7 @@ import {
   formatOrderStatusLabelEs,
   formatPaymentStatusLabelEs,
   groupOrderItemRows,
+  mergeOrderItemRows,
   isWaiterDeliveryOrder,
   normalizeOrderStatus,
   paymentIsApproved,
@@ -432,8 +433,25 @@ export default function WaiterApp({ onLogout }) {
       setScheduledDeliveryDate(localDateInputValue());
       setScheduledDeliveryTime("");
       setObservacion("");
-      setTab("history");
-      setToast(deliveryDetails ? "Listo · delivery enviado a cocina" : "Listo · enviado a cocina");
+      if (deliveryDetails) {
+        setTab("history");
+        setToast("Listo · delivery enviado a cocina");
+      } else {
+        const hadOpenAccount = orders.some(
+          (row) =>
+            orderIsTableService(row) &&
+            Number(tableNumberLabel(row)) === Number(tableNum) &&
+            normalizeOrderStatus(row) !== "cancelled" &&
+            !paymentIsApproved(row)
+        );
+        setSelectedMesa(Number(tableNum));
+        setTab("mesas");
+        setToast(
+          hadOpenAccount
+            ? `Agregado a la mesa ${tableNum} · enviado a cocina`
+            : "Listo · enviado a cocina"
+        );
+      }
     }
     setSubmitting(false);
   }
@@ -560,18 +578,29 @@ export default function WaiterApp({ onLogout }) {
 
   async function confirmOrderPayment(order) {
     if (!order?.id) return;
-    if (paymentIsApproved(order)) {
-      setError("El pago de este pedido ya figura confirmado.");
-      return;
-    }
-    if (normalizeOrderStatus(order) === "cancelled") {
-      setError("No se puede confirmar el pago de un pedido cancelado.");
+    const mesa = Number(tableNumberLabel(order));
+    const accountOrders =
+      orderIsTableService(order) && Number.isFinite(mesa)
+        ? orders.filter(
+            (row) =>
+              orderIsTableService(row) &&
+              Number(tableNumberLabel(row)) === mesa &&
+              normalizeOrderStatus(row) !== "cancelled" &&
+              !paymentIsApproved(row)
+          )
+        : [order];
+    const pending = accountOrders.filter((row) => row?.id && normalizeOrderStatus(row) !== "cancelled");
+    if (!pending.length || pending.every((row) => paymentIsApproved(row))) {
+      setError("El pago de esta cuenta ya figura confirmado.");
       return;
     }
 
     const ok = await requestConfirm({
       title: "Marcar pagado",
-      message: "El pedido entra a las estadísticas y la mesa queda libre si no tiene otro pedido sin cobrar.",
+      message:
+        pending.length > 1
+          ? "Se cobra la cuenta completa de la mesa. Entra a las estadísticas y la mesa queda libre."
+          : "El pedido entra a las estadísticas y la mesa queda libre.",
       confirmLabel: "Pagado",
       cancelLabel: "Volver",
       tone: "info"
@@ -579,33 +608,34 @@ export default function WaiterApp({ onLogout }) {
     if (!ok) return;
 
     setError("");
-    setSavingOrderId(order.id);
+    setSavingOrderId(pending[0].id);
     const paidAt = new Date().toISOString();
-    const { data: updatedRow, error: updateError } = await supabase
+    const { data: updatedRows, error: updateError } = await supabase
       .from("orders")
       .update({
         payment_status: "paid",
         payment_paid_at: paidAt
       })
-      .eq("id", order.id)
+      .in(
+        "id",
+        pending.map((row) => row.id)
+      )
       .neq("status", "cancelled")
-      .select("*")
-      .maybeSingle();
+      .select("*");
 
     if (updateError) {
       setError(`No se pudo confirmar el pago: ${updateError.message}`);
       setSavingOrderId(null);
       return;
     }
-    if (!updatedRow) {
+    if (!updatedRows?.length) {
       setError("No se actualizó el pedido. Recargá la lista o probá de nuevo.");
       setSavingOrderId(null);
       return;
     }
 
-    setOrders((prev) =>
-      prev.map((row) => (row.id === order.id ? { ...row, ...updatedRow } : row))
-    );
+    const byId = new Map(updatedRows.map((row) => [row.id, row]));
+    setOrders((prev) => prev.map((row) => (byId.has(row.id) ? { ...row, ...byId.get(row.id) } : row)));
     setSavingOrderId(null);
     setToast("Pago en efectivo confirmado");
   }
@@ -937,6 +967,10 @@ export default function WaiterApp({ onLogout }) {
                     <p className="mt-2 text-sm font-medium text-amber-200" role="alert">
                       {mesaWarning}
                     </p>
+                  ) : (openOrdersByTable.get(Number(tableNumber)) || []).length > 0 ? (
+                    <p className="mt-2 text-xs text-amber-200">
+                      La mesa {Number(tableNumber)} tiene una cuenta abierta. Lo que envíes se suma a esa cuenta y cocina recibe solo lo nuevo.
+                    </p>
                   ) : (
                     <p className="mt-2 text-xs text-slate-500">Obligatorio para enviar el pedido a cocina.</p>
                   )}
@@ -1048,7 +1082,11 @@ export default function WaiterApp({ onLogout }) {
                   onClick={() => submitOrder()}
                   className="rounded-lg bg-emerald-500 px-6 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
                 >
-                  {submitting ? "Enviando…" : "Enviar a cocina"}
+                  {submitting
+                    ? "Enviando…"
+                    : (openOrdersByTable.get(Number(tableNumber)) || []).length > 0
+                      ? "Agregar a la cuenta"
+                      : "Enviar a cocina"}
                 </button>
               </div>
             </div>
@@ -1056,7 +1094,7 @@ export default function WaiterApp({ onLogout }) {
         ) : tab === "mesas" ? (
           <div className="space-y-4">
             <p className="text-xs text-slate-500">
-              Una mesa queda ocupada cuando alguien pide (QR o mozo) y vuelve a estar disponible cuando se cobra.
+              Cada mesa tiene una cuenta. Si piden algo más, se suma ahí y cocina recibe solo lo nuevo. Al cobrar, la mesa queda libre.
             </p>
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
               {mesaNumbers.map((n) => {
@@ -1100,42 +1138,63 @@ export default function WaiterApp({ onLogout }) {
                 </button>
               </div>
             ) : (
-              <div className="space-y-3">
-                {(openOrdersByTable.get(selectedMesa) || []).map((order) => {
-                  const rows = groupOrderItemRows(order);
-                  const savingThisOrder = savingOrderId === order.id;
-                  return (
-                    <article
-                      key={order.id}
-                      className="rounded-xl border border-amber-500/30 bg-slate-900/60 px-4 py-3"
-                    >
-                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                        <p className="font-semibold text-slate-100">Mesa {selectedMesa}</p>
-                        <p className="text-xs text-slate-500">{formatDateTime(order.created_at)}</p>
-                      </div>
-                      <ul className="space-y-1">
-                        {rows.map((row) => (
-                          <li key={`${order.id}-${row.name}`} className="text-sm text-slate-100">
-                            {row.name}
-                            {row.count > 1 ? ` × ${row.count}` : ""}
-                          </li>
-                        ))}
-                      </ul>
-                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 pt-3">
-                        <p className="text-lg font-bold text-emerald-200">{currency(subtotalForOrder(order))}</p>
+              (() => {
+                const list = [...(openOrdersByTable.get(selectedMesa) || [])].sort(
+                  (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                );
+                const rows = mergeOrderItemRows(list);
+                const total = list.reduce((sum, order) => sum + subtotalForOrder(order), 0);
+                const savingThisAccount = list.some((order) => savingOrderId === order.id);
+                return (
+                  <article className="rounded-xl border border-amber-500/30 bg-slate-900/60 px-4 py-3">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-semibold text-slate-100">Cuenta · Mesa {selectedMesa}</p>
+                      <p className="text-xs text-slate-500">
+                        {list.length === 1 ? "1 envío a cocina" : `${list.length} envíos a cocina`}
+                      </p>
+                    </div>
+                    <ul className="space-y-1">
+                      {rows.map((row) => (
+                        <li key={`${selectedMesa}-${row.name}`} className="text-base text-slate-100">
+                          {row.name}
+                          {row.count > 1 ? ` × ${row.count}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="mt-3 space-y-1">
+                      {list.map((order, index) => (
+                        <p key={order.id} className="text-xs text-slate-500">
+                          {index === 0 ? "Pedido inicial" : "Agregado"} · {formatDateTime(order.created_at)}
+                        </p>
+                      ))}
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 pt-3">
+                      <p className="text-lg font-bold text-emerald-200">{currency(total)}</p>
+                      <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
-                          disabled={savingThisOrder}
-                          onClick={() => confirmOrderPayment(order)}
+                          onClick={() => {
+                            setFulfillmentType("mesa");
+                            setTableNumber(String(selectedMesa));
+                            setTab("order");
+                          }}
+                          className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-slate-800"
+                        >
+                          Agregar a la cuenta
+                        </button>
+                        <button
+                          type="button"
+                          disabled={savingThisAccount}
+                          onClick={() => confirmOrderPayment(list[0])}
                           className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
                         >
-                          {savingThisOrder ? "Guardando…" : "Pagado"}
+                          {savingThisAccount ? "Guardando…" : "Pagado"}
                         </button>
                       </div>
-                    </article>
-                  );
-                })}
-              </div>
+                    </div>
+                  </article>
+                );
+              })()
             )}
           </div>
         ) : (

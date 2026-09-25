@@ -340,6 +340,71 @@ export function groupOrderItemRows(order) {
   return ord.map((name) => ({ name, count: counts.get(name) }));
 }
 
+export function mergeOrderItemRows(orders) {
+  const counts = new Map();
+  const sequence = [];
+  for (const row of (orders || []).flatMap((order) => groupOrderItemRows(order))) {
+    if (!counts.has(row.name)) {
+      counts.set(row.name, 0);
+      sequence.push(row.name);
+    }
+    counts.set(row.name, counts.get(row.name) + row.count);
+  }
+  return sequence.map((name) => ({ name, count: counts.get(name) }));
+}
+
+function tableAccountClosedBefore(previousOrders, nextOrder) {
+  const created = new Date(nextOrder?.created_at).getTime();
+  if (!Number.isFinite(created)) return false;
+  return previousOrders.every((prev) => {
+    if (!paymentIsApproved(prev)) return false;
+    const paidAt = new Date(prev.payment_paid_at).getTime();
+    return Number.isFinite(paidAt) && paidAt <= created;
+  });
+}
+
+/** Una cuenta de mesa agrupa los envíos a cocina hechos antes de cobrar. El resto queda como pedido suelto. */
+export function buildOrderAccounts(orders) {
+  const accounts = [];
+  const byTable = new Map();
+  for (const order of orders || []) {
+    const mesa = tableNumberLabel(order);
+    if (!orderIsTableService(order) || normalizeOrderStatus(order) === "cancelled" || !mesa) {
+      accounts.push({ orders: [order], lead: order });
+      continue;
+    }
+    const list = byTable.get(mesa) || [];
+    list.push(order);
+    byTable.set(mesa, list);
+  }
+  for (const list of byTable.values()) {
+    const chronological = [...list].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+    let current = [];
+    for (const order of chronological) {
+      if (current.length && tableAccountClosedBefore(current, order)) {
+        const newestFirst = [...current].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        accounts.push({ orders: newestFirst, lead: newestFirst[0] });
+        current = [order];
+      } else {
+        current.push(order);
+      }
+    }
+    if (current.length) {
+      const newestFirst = [...current].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+      accounts.push({ orders: newestFirst, lead: newestFirst[0] });
+    }
+  }
+  return accounts.sort(
+    (a, b) => new Date(b.lead.created_at).getTime() - new Date(a.lead.created_at).getTime()
+  );
+}
+
 /** Pedido que cocina debe elaborar: confirmado y aún abierto. No hace falta marcar “listo” en el panel. */
 export function orderInKitchenQueue(order) {
   const st = normalizeOrderStatus(order);

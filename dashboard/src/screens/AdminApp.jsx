@@ -17,7 +17,9 @@ import {
   orderNeedsDeliveryFeeControls,
   adminShowNotifyDeliveriesReadyButton,
   adminShowClienteNroRow,
+  buildOrderAccounts,
   groupOrderItemRows,
+  mergeOrderItemRows,
   orderFromWaiterPanelNotes,
   orderIsTableService,
   orderInKitchenQueue,
@@ -500,6 +502,8 @@ export default function AdminApp({ onLogout }) {
       ),
     [orders]
   );
+
+  const orderAccounts = useMemo(() => buildOrderAccounts(sortedOrders), [sortedOrders]);
 
   /** Lista menú A→Z por nombre (tras alta/edición local también queda ordenada). */
   const menuItemsAlphabetical = useMemo(
@@ -1127,6 +1131,48 @@ export default function AdminApp({ onLogout }) {
     setOrders((prev) =>
       prev.map((row) => (row.id === order.id ? { ...row, ...updatedRow } : row))
     );
+    setSavingOrderId(null);
+  }
+
+  async function confirmAccountCashPayment(accountOrders) {
+    const pending = (accountOrders || []).filter(
+      (row) =>
+        paymentMethodKey(row) === "cash" &&
+        !paymentIsApproved(row) &&
+        normalizeOrderStatus(row) !== "cancelled"
+    );
+    if (!pending.length) {
+      setError("No hay pagos en efectivo pendientes en esta cuenta.");
+      return;
+    }
+    setError("");
+    setSavingOrderId(pending[0].id);
+    const paidAtIso = new Date().toISOString();
+    const { data: updatedRows, error: updateError } = await supabase
+      .from("orders")
+      .update({
+        payment_status: "paid",
+        payment_paid_at: paidAtIso
+      })
+      .in(
+        "id",
+        pending.map((row) => row.id)
+      )
+      .neq("status", "cancelled")
+      .select("*");
+
+    if (updateError) {
+      setError(`Error confirmando pago efectivo: ${updateError.message}`);
+      setSavingOrderId(null);
+      return;
+    }
+    if (!updatedRows?.length) {
+      setError("No se actualizó el pedido. Recargá la lista o probá de nuevo.");
+      setSavingOrderId(null);
+      return;
+    }
+    const byId = new Map(updatedRows.map((row) => [row.id, row]));
+    setOrders((prev) => prev.map((row) => (byId.has(row.id) ? { ...row, ...byId.get(row.id) } : row)));
     setSavingOrderId(null);
   }
 
@@ -2145,19 +2191,25 @@ export default function AdminApp({ onLogout }) {
                 No hay pedidos para los filtros aplicados.
               </div>
             ) : (
-              sortedOrders.map((order) => {
-                const deliveryIssueAlertOpen =
-                  Boolean(order.delivery_issue_reason) && !order.delivery_issue_acknowledged_at;
+              orderAccounts.map((account) => {
+                const order = account.lead;
+                const accountOrders = account.orders;
+                const deliveryIssueAlertOpen = accountOrders.some(
+                  (row) => Boolean(row.delivery_issue_reason) && !row.delivery_issue_acknowledged_at
+                );
                 const stForIssue = normalizeOrderStatus(order);
                 const deliveryIssueCloseOnly =
                   deliveryIssueAlertOpen &&
                   (stForIssue === "cancelled" || stForIssue === "delivered");
                 const tableOrder = orderIsTableService(order);
-                const itemRows = groupOrderItemRows(order);
+                const itemRows = tableOrder ? mergeOrderItemRows(accountOrders) : groupOrderItemRows(order);
+                const accountTotal = accountOrders.reduce((sum, row) => sum + subtotalForOrder(row), 0);
                 const customerLabel = String(order.customer_number || "").trim();
                 const showCliente = !tableOrder && customerLabel && customerLabel !== "0";
                 const showClienteNro = adminShowClienteNroRow(order);
-                const mozoName = waiterNameFromMozoNotes(order.notes);
+                const mozoName = [
+                  ...new Set(accountOrders.map((row) => waiterNameFromMozoNotes(row.notes)).filter(Boolean))
+                ].join(", ");
 
                 return (
                 <article
@@ -2214,7 +2266,11 @@ export default function AdminApp({ onLogout }) {
                     </div>
                   ) : null}
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <h2 className="text-sm font-semibold text-slate-200">Pedido #{order.id.slice(0, 8)}</h2>
+                    <h2 className="text-sm font-semibold text-slate-200">
+                      {tableOrder && accountOrders.length > 1
+                        ? `Cuenta · Mesa ${tableNumberLabel(order)}`
+                        : `Pedido #${order.id.slice(0, 8)}`}
+                    </h2>
                     <div className="flex flex-wrap items-center gap-2">
                       {tableNumberLabel(order) ? (
                         <span className="rounded-full bg-violet-500/25 px-2.5 py-1 text-xs font-semibold text-violet-200">
@@ -2258,6 +2314,11 @@ export default function AdminApp({ onLogout }) {
                         </li>
                       ))}
                     </ul>
+                  ) : null}
+                  {tableOrder && accountOrders.length > 1 ? (
+                    <p className="mb-3 text-xs text-slate-500">
+                      {accountOrders.length} envíos a cocina en esta cuenta. El total junta todo lo pedido en la mesa.
+                    </p>
                   ) : null}
                   <div className="grid gap-2 text-sm text-slate-300 md:grid-cols-2">
                     {showCliente || showClienteNro ? (
@@ -2307,7 +2368,7 @@ export default function AdminApp({ onLogout }) {
                     <p>
                       <span className="text-slate-500">{tableOrder ? "Total:" : "Subtotal productos:"}</span>{" "}
                       <span className={tableOrder ? "text-lg font-semibold text-emerald-200" : ""}>
-                        {currency(subtotalForOrder(order))}
+                        {currency(tableOrder ? accountTotal : subtotalForOrder(order))}
                       </span>
                     </p>
                     {tableOrder ? null : (
@@ -2368,10 +2429,15 @@ export default function AdminApp({ onLogout }) {
                         {adminDashboardNotesBlock(order) || "-"}
                       </p>
                     )}
-                    {orderObservacionText(order) ? (
+                    {accountOrders.some((row) => orderObservacionText(row)) ? (
                       <p className="md:col-span-2">
                         <span className="text-slate-500">Observación:</span>{" "}
-                        <span className="font-medium text-amber-100">{orderObservacionText(order)}</span>
+                        <span className="font-medium text-amber-100">
+                          {accountOrders
+                            .map((row) => orderObservacionText(row))
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </span>
                       </p>
                     ) : null}
                     {deliveryEnabled && shouldShowDeliveryRepartoSection(order) ? (
@@ -2590,11 +2656,28 @@ export default function AdminApp({ onLogout }) {
 
                     {(() => {
                       const method = paymentMethodKey(order);
-                      const approved = paymentIsApproved(order);
-                      const paidAtLabel = formatPaidAt(order.payment_paid_at);
+                      const unpaidCashOrders = accountOrders.filter(
+                        (row) =>
+                          paymentMethodKey(row) === "cash" &&
+                          !paymentIsApproved(row) &&
+                          normalizeOrderStatus(row) !== "cancelled"
+                      );
+                      const approved = tableOrder
+                        ? accountOrders.every(
+                            (row) =>
+                              paymentIsApproved(row) || normalizeOrderStatus(row) === "cancelled"
+                          )
+                        : paymentIsApproved(order);
+                      const paidAtLabel = formatPaidAt(
+                        tableOrder
+                          ? accountOrders.map((row) => row.payment_paid_at).filter(Boolean).sort().at(-1)
+                          : order.payment_paid_at
+                      );
                       const status = normalizeOrderStatus(order);
                       const isClosed = status === "delivered" || status === "cancelled";
-                      const canConfirmCash = method === "cash" && !approved && status !== "cancelled";
+                      const canConfirmCash = tableOrder
+                        ? unpaidCashOrders.length > 0
+                        : method === "cash" && !paymentIsApproved(order) && status !== "cancelled";
                       const deliveredAtLabel = formatPaidAt(order.delivered_at);
                       const cancelledAtLabel = formatPaidAt(order.cancelled_at);
 
@@ -2642,7 +2725,11 @@ export default function AdminApp({ onLogout }) {
                             <button
                               type="button"
                               disabled={savingOrderId === order.id}
-                              onClick={() => confirmCashPayment(order)}
+                              onClick={() =>
+                                tableOrder
+                                  ? confirmAccountCashPayment(unpaidCashOrders)
+                                  : confirmCashPayment(order)
+                              }
                               className="rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-1 text-xs text-blue-300"
                             >
                               {tableOrder ? "Pagado" : "Confirmar pago efectivo"}
@@ -2669,7 +2756,11 @@ export default function AdminApp({ onLogout }) {
                                   <button
                                     type="button"
                                     disabled={savingOrderId === order.id}
-                                    onClick={() => confirmCashPayment(order)}
+                                    onClick={() =>
+                                tableOrder
+                                  ? confirmAccountCashPayment(unpaidCashOrders)
+                                  : confirmCashPayment(order)
+                              }
                                     className="rounded-md border border-blue-400/50 bg-blue-500/15 px-2 py-0.5 text-[11px] font-medium text-blue-200 hover:bg-blue-500/25 disabled:opacity-50"
                                   >
                                     {tableOrder ? "Pagado" : "Confirmar pago efectivo"}
