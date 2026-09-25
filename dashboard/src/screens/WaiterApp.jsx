@@ -14,10 +14,11 @@ import {
   playNotification,
   subtotalForOrder,
   tableNumberLabel,
+  orderIsTableService,
   orderObservacionText
 } from "../lib/format";
 
-const HISTORY_HOURS = 18;
+const HISTORY_HOURS = 72;
 /** El contador del tab "Pedidos realizados" se oculta tras este tiempo (ms). */
 const PEDIDOS_REALIZADOS_BADGE_MS = 60_000;
 
@@ -117,6 +118,8 @@ export default function WaiterApp({ onLogout }) {
   const [savingOrderId, setSavingOrderId] = useState(null);
   const [error, setError] = useState("");
   const [tab, setTab] = useState("order");
+  const [tableCount, setTableCount] = useState(12);
+  const [selectedMesa, setSelectedMesa] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
   const confirmResolverRef = useRef(null);
   const [toast, setToast] = useState(null);
@@ -164,6 +167,8 @@ export default function WaiterApp({ onLogout }) {
       setRestaurantId(data.id);
       setRestaurantName(data.name || "");
       setBotNumber(String(data.whatsapp_number || "").replace(/\D/g, "") || "0");
+      const tables = Number(data.table_count);
+      setTableCount(Number.isFinite(tables) && tables >= 1 ? Math.floor(tables) : 12);
       const metadataObj =
         data?.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata)
           ? data.metadata
@@ -207,7 +212,7 @@ export default function WaiterApp({ onLogout }) {
         .eq("restaurant_id", restaurantId)
         .gte("created_at", sinceIso)
         .order("created_at", { ascending: false })
-        .limit(200);
+        .limit(400);
       if (!active) return;
       if (queryError) {
         setError(`Error cargando pedidos: ${queryError.message}`);
@@ -286,6 +291,27 @@ export default function WaiterApp({ onLogout }) {
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [orders]);
 
+  const openOrdersByTable = useMemo(() => {
+    const map = new Map();
+    for (const order of orders) {
+      if (!orderIsTableService(order)) continue;
+      if (normalizeOrderStatus(order) === "cancelled") continue;
+      if (paymentIsApproved(order)) continue;
+      const mesa = Number(tableNumberLabel(order));
+      if (!Number.isFinite(mesa) || mesa < 1) continue;
+      const list = map.get(mesa) || [];
+      list.push(order);
+      map.set(mesa, list);
+    }
+    return map;
+  }, [orders]);
+
+  const mesaNumbers = useMemo(() => {
+    const maxOccupied = Math.max(0, ...openOrdersByTable.keys());
+    const count = Math.max(tableCount, maxOccupied);
+    return Array.from({ length: count }, (_, index) => index + 1);
+  }, [openOrdersByTable, tableCount]);
+
   useEffect(() => {
     if (myOrdersToday.length === 0) {
       setHidePedidosRealizadosBadge(false);
@@ -349,14 +375,14 @@ export default function WaiterApp({ onLogout }) {
 
     const row = {
       restaurant_id: restaurantId,
-      customer_number: botNumber,
+      customer_number: deliveryDetails ? botNumber : "",
       bot_number: botNumber,
       items: cartLines,
       notes,
       status: "confirmed",
       payment_method: deliveryDetails ? "efectivo" : "efectivo_mesa",
-      payment_status: "paid",
-      payment_paid_at: new Date().toISOString(),
+      payment_status: deliveryDetails ? "paid" : "pending",
+      payment_paid_at: deliveryDetails ? new Date().toISOString() : null,
       fulfillment_type: deliveryDetails ? "delivery_mozo" : "mesa",
       total_price: totalAmount,
       total_amount: totalAmount,
@@ -544,9 +570,9 @@ export default function WaiterApp({ onLogout }) {
     }
 
     const ok = await requestConfirm({
-      title: "Confirmar pago",
-      message: "El pedido quedará marcado como pagado. ¿Confirmás la operación?",
-      confirmLabel: "Sí, confirmar pago",
+      title: "Marcar pagado",
+      message: "El pedido entra a las estadísticas y la mesa queda libre si no tiene otro pedido sin cobrar.",
+      confirmLabel: "Pagado",
       cancelLabel: "Volver",
       tone: "info"
     });
@@ -581,7 +607,7 @@ export default function WaiterApp({ onLogout }) {
       prev.map((row) => (row.id === order.id ? { ...row, ...updatedRow } : row))
     );
     setSavingOrderId(null);
-    setToast("Pago confirmado");
+    setToast("Pago en efectivo confirmado");
   }
 
   async function markOrderDelivered(order) {
@@ -717,6 +743,22 @@ export default function WaiterApp({ onLogout }) {
             }`}
           >
             Nuevo pedido
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("mesas")}
+            className={`flex-1 rounded-lg py-2 text-sm font-medium ${
+              tab === "mesas"
+                ? "bg-emerald-500/20 text-emerald-200"
+                : "text-slate-400 hover:bg-slate-800/60"
+            }`}
+          >
+            Mesas
+            {openOrdersByTable.size > 0 ? (
+              <span className="ml-1 rounded-full bg-amber-500/20 px-1.5 text-[11px] text-amber-200">
+                {openOrdersByTable.size}
+              </span>
+            ) : null}
           </button>
           <button
             type="button"
@@ -1011,6 +1053,91 @@ export default function WaiterApp({ onLogout }) {
               </div>
             </div>
           </div>
+        ) : tab === "mesas" ? (
+          <div className="space-y-4">
+            <p className="text-xs text-slate-500">
+              Una mesa queda ocupada cuando alguien pide (QR o mozo) y vuelve a estar disponible cuando se cobra.
+            </p>
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+              {mesaNumbers.map((n) => {
+                const list = openOrdersByTable.get(n) || [];
+                const occupied = list.length > 0;
+                const selected = selectedMesa === n;
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setSelectedMesa(selected ? null : n)}
+                    className={`rounded-xl border px-2 py-3 text-center ${
+                      occupied
+                        ? selected
+                          ? "border-amber-300 bg-amber-500/25 text-amber-50"
+                          : "border-amber-500/40 bg-amber-500/10 text-amber-100"
+                        : selected
+                          ? "border-emerald-300 bg-emerald-500/20 text-emerald-50"
+                          : "border-slate-700 bg-slate-900/50 text-slate-200"
+                    }`}
+                  >
+                    <p className="text-lg font-semibold tabular-nums">{n}</p>
+                    <p className="text-[11px]">{occupied ? "Ocupada" : "Disponible"}</p>
+                  </button>
+                );
+              })}
+            </div>
+            {selectedMesa == null ? null : (openOrdersByTable.get(selectedMesa) || []).length === 0 ? (
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/20 px-4 py-4">
+                <p className="text-sm text-emerald-100">Mesa {selectedMesa} disponible.</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFulfillmentType("mesa");
+                    setTableNumber(String(selectedMesa));
+                    setTab("order");
+                  }}
+                  className="mt-3 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400"
+                >
+                  Tomar pedido
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {(openOrdersByTable.get(selectedMesa) || []).map((order) => {
+                  const rows = groupOrderItemRows(order);
+                  const savingThisOrder = savingOrderId === order.id;
+                  return (
+                    <article
+                      key={order.id}
+                      className="rounded-xl border border-amber-500/30 bg-slate-900/60 px-4 py-3"
+                    >
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-semibold text-slate-100">Mesa {selectedMesa}</p>
+                        <p className="text-xs text-slate-500">{formatDateTime(order.created_at)}</p>
+                      </div>
+                      <ul className="space-y-1">
+                        {rows.map((row) => (
+                          <li key={`${order.id}-${row.name}`} className="text-sm text-slate-100">
+                            {row.name}
+                            {row.count > 1 ? ` × ${row.count}` : ""}
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 pt-3">
+                        <p className="text-lg font-bold text-emerald-200">{currency(subtotalForOrder(order))}</p>
+                        <button
+                          type="button"
+                          disabled={savingThisOrder}
+                          onClick={() => confirmOrderPayment(order)}
+                          className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                        >
+                          {savingThisOrder ? "Guardando…" : "Pagado"}
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         ) : (
           <div className="space-y-3">
             <p className="text-xs text-slate-500">
@@ -1095,7 +1222,7 @@ export default function WaiterApp({ onLogout }) {
                           onClick={() => confirmOrderPayment(order)}
                           className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
                         >
-                          {savingThisOrder ? "Guardando…" : "Confirmar pago"}
+                          {savingThisOrder ? "Guardando…" : "Pagado"}
                         </button>
                       ) : null}
                       {delivery && !isClosed ? (

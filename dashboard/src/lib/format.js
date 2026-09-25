@@ -53,6 +53,15 @@ export function orderFromWaiterPanelNotes(order) {
   return false;
 }
 
+/** Pedido de salón (carta QR o mozo en mesa), no delivery ni retiro. */
+export function orderIsTableService(order) {
+  if (isWaiterDeliveryOrder(order) || fulfillmentIsDelivery(order)) return false;
+  const ft = String(order?.fulfillment_type ?? "").trim().toLowerCase();
+  if (ft === "delivery" || ft === "delivery_mozo" || ft === "local") return false;
+  if (ft === "mesa") return true;
+  return /^Mozo\s*·\s*Mesa:/i.test(String(order?.notes || "").trim());
+}
+
 /** Mesa desde carta/QR/API sin identidad WhatsApp del comensal (`customer_number` vacío en BD). */
 export function orderIsAnonymousMesaWeb(order) {
   const ft = String(order?.fulfillment_type ?? "").trim().toLowerCase();
@@ -72,6 +81,8 @@ export function adminShowClienteNroRow(order) {
 /** Pedido cargado desde el panel Mozo (no desde WhatsApp del cliente). */
 export function orderPlacedByWaiter(order) {
   if (orderFromWaiterPanelNotes(order)) return true;
+  const notes = String(order?.notes || "").trim();
+  if (/^Mesa:\s*\d+/i.test(notes) && !/·\s*Mozo:/i.test(notes)) return false;
   const pm = String(order?.payment_method ?? "").toLowerCase();
   if (pm.includes("efectivo_mesa")) return true;
   return false;

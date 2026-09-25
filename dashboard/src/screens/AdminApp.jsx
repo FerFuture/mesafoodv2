@@ -17,7 +17,9 @@ import {
   orderNeedsDeliveryFeeControls,
   adminShowNotifyDeliveriesReadyButton,
   adminShowClienteNroRow,
+  groupOrderItemRows,
   orderFromWaiterPanelNotes,
+  orderIsTableService,
   orderInKitchenQueue,
   orderKitchenReady,
   orderObservacionText,
@@ -26,7 +28,8 @@ import {
   playNotification,
   subtotalForOrder,
   formatDateTime as formatPaidAt,
-  tableNumberLabel
+  tableNumberLabel,
+  waiterNameFromMozoNotes
 } from "../lib/format";
 import AdminStats from "./AdminStats";
 import {
@@ -2149,6 +2152,12 @@ export default function AdminApp({ onLogout }) {
                 const deliveryIssueCloseOnly =
                   deliveryIssueAlertOpen &&
                   (stForIssue === "cancelled" || stForIssue === "delivered");
+                const tableOrder = orderIsTableService(order);
+                const itemRows = groupOrderItemRows(order);
+                const customerLabel = String(order.customer_number || "").trim();
+                const showCliente = !tableOrder && customerLabel && customerLabel !== "0";
+                const showClienteNro = adminShowClienteNroRow(order);
+                const mozoName = waiterNameFromMozoNotes(order.notes);
 
                 return (
                 <article
@@ -2210,6 +2219,7 @@ export default function AdminApp({ onLogout }) {
                       {tableNumberLabel(order) ? (
                         <span className="rounded-full bg-violet-500/25 px-2.5 py-1 text-xs font-semibold text-violet-200">
                           Mesa {tableNumberLabel(order)}
+                          {mozoName ? ` · ${mozoName}` : ""}
                         </span>
                       ) : null}
                       {orderKitchenReady(order) ? (
@@ -2234,13 +2244,31 @@ export default function AdminApp({ onLogout }) {
                       </span>
                     </div>
                   </div>
+                  {itemRows.length > 0 ? (
+                    <ul className="mb-4 space-y-1.5 rounded-lg border border-slate-700 bg-slate-950/60 px-4 py-3">
+                      {itemRows.map((row) => (
+                        <li
+                          key={`${order.id}-${row.name}`}
+                          className="flex items-baseline justify-between gap-3 text-base font-medium text-slate-50"
+                        >
+                          <span>{row.name}</span>
+                          {row.count > 1 ? (
+                            <span className="tabular-nums text-emerald-200">× {row.count}</span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                   <div className="grid gap-2 text-sm text-slate-300 md:grid-cols-2">
+                    {showCliente || showClienteNro ? (
                     <div>
-                      <p>
-                        <span className="text-slate-500">Cliente:</span>{" "}
-                        <span className="break-all text-slate-200">{order.customer_number || "—"}</span>
-                      </p>
-                      {adminShowClienteNroRow(order) ? (
+                      {showCliente ? (
+                        <p>
+                          <span className="text-slate-500">Cliente:</span>{" "}
+                          <span className="break-all text-slate-200">{customerLabel}</span>
+                        </p>
+                      ) : null}
+                      {showClienteNro ? (
                         <p className="mt-1">
                           <span className="text-slate-500">Cliente nro:</span>{" "}
                           <span className="tabular-nums text-slate-200">
@@ -2253,8 +2281,12 @@ export default function AdminApp({ onLogout }) {
                         </p>
                       ) : null}
                     </div>
+                    ) : null}
                     <p>
-                      <span className="text-slate-500">Metodo pago:</span> {order.payment_method || "-"}
+                      <span className="text-slate-500">Metodo pago:</span>{" "}
+                      {String(order.payment_method || "") === "efectivo_mesa"
+                        ? "Efectivo en mesa"
+                        : order.payment_method || "-"}
                     </p>
                     <p>
                       <span className="text-slate-500">Modalidad:</span>{" "}
@@ -2273,28 +2305,34 @@ export default function AdminApp({ onLogout }) {
                       {formatPaymentStatusLabelEs(order.payment_status)}
                     </p>
                     <p>
-                      <span className="text-slate-500">Subtotal productos:</span>{" "}
-                      {currency(subtotalForOrder(order))}
+                      <span className="text-slate-500">{tableOrder ? "Total:" : "Subtotal productos:"}</span>{" "}
+                      <span className={tableOrder ? "text-lg font-semibold text-emerald-200" : ""}>
+                        {currency(subtotalForOrder(order))}
+                      </span>
                     </p>
-                    <p>
-                      <span className="text-slate-500">Envío:</span>{" "}
-                      {order.delivery_fee != null && order.delivery_fee !== ""
-                        ? currency(order.delivery_fee)
-                        : "—"}
-                    </p>
-                    <p>
-                      <span className="text-slate-500">Total final:</span>{" "}
-                      {order.final_total_amount != null && order.final_total_amount !== ""
-                        ? currency(order.final_total_amount)
-                        : "—"}
-                    </p>
-                    <p>
-                      <span className="text-slate-500">Total (registro):</span>{" "}
-                      {currency(order.total_price ?? order.total_amount)}
-                    </p>
-                    <p>
-                      <span className="text-slate-500">Direccion:</span> {order.address || "-"}
-                    </p>
+                    {tableOrder ? null : (
+                      <>
+                        <p>
+                          <span className="text-slate-500">Envío:</span>{" "}
+                          {order.delivery_fee != null && order.delivery_fee !== ""
+                            ? currency(order.delivery_fee)
+                            : "—"}
+                        </p>
+                        <p>
+                          <span className="text-slate-500">Total final:</span>{" "}
+                          {order.final_total_amount != null && order.final_total_amount !== ""
+                            ? currency(order.final_total_amount)
+                            : "—"}
+                        </p>
+                        <p>
+                          <span className="text-slate-500">Total (registro):</span>{" "}
+                          {currency(order.total_price ?? order.total_amount)}
+                        </p>
+                        <p>
+                          <span className="text-slate-500">Direccion:</span> {order.address || "-"}
+                        </p>
+                      </>
+                    )}
                     {order.scheduled_delivery_at ? (
                       <p>
                         <span className="text-slate-500">Horario delivery:</span>{" "}
@@ -2324,10 +2362,12 @@ export default function AdminApp({ onLogout }) {
                       <span className="text-slate-500">Fecha:</span>{" "}
                       {order.created_at ? new Date(order.created_at).toLocaleString("es-AR") : "-"}
                     </p>
-                    <p className="md:col-span-2">
-                      <span className="text-slate-500">Notas:</span>{" "}
-                      {adminDashboardNotesBlock(order) || "-"}
-                    </p>
+                    {tableOrder ? null : (
+                      <p className="md:col-span-2">
+                        <span className="text-slate-500">Notas:</span>{" "}
+                        {adminDashboardNotesBlock(order) || "-"}
+                      </p>
+                    )}
                     {orderObservacionText(order) ? (
                       <p className="md:col-span-2">
                         <span className="text-slate-500">Observación:</span>{" "}
@@ -2605,7 +2645,7 @@ export default function AdminApp({ onLogout }) {
                               onClick={() => confirmCashPayment(order)}
                               className="rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-1 text-xs text-blue-300"
                             >
-                              Confirmar pago efectivo
+                              {tableOrder ? "Pagado" : "Confirmar pago efectivo"}
                             </button>
                           ) : null}
 
@@ -2632,7 +2672,7 @@ export default function AdminApp({ onLogout }) {
                                     onClick={() => confirmCashPayment(order)}
                                     className="rounded-md border border-blue-400/50 bg-blue-500/15 px-2 py-0.5 text-[11px] font-medium text-blue-200 hover:bg-blue-500/25 disabled:opacity-50"
                                   >
-                                    Confirmar pago efectivo
+                                    {tableOrder ? "Pagado" : "Confirmar pago efectivo"}
                                   </button>
                                 ) : null}
                                 <button
