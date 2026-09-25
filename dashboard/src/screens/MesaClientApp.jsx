@@ -82,6 +82,7 @@ export default function MesaClientApp() {
   const mesaTokenFromUrl = String(searchParams.get("t") || "").trim();
 
   const cartaRoute = Boolean(matchPath("/carta", location.pathname));
+  const viewOnly = cartaRoute && String(searchParams.get("ver") || "") === "1";
 
   const parsedTableNumber = useMemo(() => {
     if (cartaRoute) {
@@ -112,8 +113,9 @@ export default function MesaClientApp() {
   const confirmResolverRef = useRef(null);
 
   const visibleMenuItems = useMemo(
-    () => menuItems.filter((item) => !shouldHideMesaQrCategory(item?.category)),
-    [menuItems]
+    () =>
+      viewOnly ? menuItems : menuItems.filter((item) => !shouldHideMesaQrCategory(item?.category)),
+    [menuItems, viewOnly]
   );
 
   const menuById = useMemo(() => {
@@ -408,7 +410,7 @@ export default function MesaClientApp() {
     await performSubmitOrder(parsedTableNumber);
   }
 
-  if (parsedTableNumber == null) {
+  if (parsedTableNumber == null && !viewOnly) {
     return (
       <div className="dark min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
         <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/60 p-6 text-center">
@@ -433,7 +435,7 @@ export default function MesaClientApp() {
     );
   }
 
-  if (!mesaEnabled) {
+  if (!mesaEnabled && !viewOnly) {
     return (
       <div className="dark min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
         <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/60 p-6 text-center">
@@ -446,7 +448,7 @@ export default function MesaClientApp() {
     );
   }
 
-  if (MESA_QR_TOKEN_REQUIRED && !mesaTokenFromUrl) {
+  if (!viewOnly && MESA_QR_TOKEN_REQUIRED && !mesaTokenFromUrl) {
     return (
       <div className="dark min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
         <div className="w-full max-w-md rounded-2xl border border-amber-500/35 bg-slate-900/60 p-6 text-center">
@@ -459,7 +461,7 @@ export default function MesaClientApp() {
     );
   }
 
-  if (mesaBlocked) {
+  if (!viewOnly && mesaBlocked) {
     return (
       <div className="dark min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
         <div className="w-full max-w-md rounded-2xl border border-rose-500/35 bg-slate-900/60 p-6 text-center">
@@ -480,12 +482,16 @@ export default function MesaClientApp() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h1 className="text-lg font-semibold text-white">{restaurantName || "Restaurante"}</h1>
-              <p className="text-xs text-slate-400">Pedido para la mesa {parsedTableNumber}</p>
+              <p className="text-xs text-slate-400">
+                {viewOnly ? "Carta" : `Pedido para la mesa ${parsedTableNumber}`}
+              </p>
             </div>
+            {viewOnly ? null : (
             <div className="text-right">
               <p className="text-xs text-slate-500">Total</p>
               <p className="text-lg font-bold tabular-nums text-emerald-200">{currency(totalAmount)}</p>
             </div>
+            )}
           </div>
         </div>
       </header>
@@ -546,8 +552,12 @@ export default function MesaClientApp() {
                     >
                       <div className="min-w-0 flex-1">
                         <p className="font-medium text-slate-100">{item.name}</p>
+                        {item.description ? (
+                          <p className="text-xs text-slate-400">{item.description}</p>
+                        ) : null}
                         <p className="text-sm text-emerald-300/90">{currency(item.price)}</p>
                       </div>
+                      {viewOnly ? null : (
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
@@ -567,6 +577,7 @@ export default function MesaClientApp() {
                           +
                         </button>
                       </div>
+                      )}
                     </div>
                   );
                 })}
@@ -575,6 +586,7 @@ export default function MesaClientApp() {
           ))}
         </section>
 
+        {viewOnly ? null : (
         <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-4">
           <label className="block text-xs font-medium uppercase tracking-wider text-slate-400">
             Observación <span className="normal-case tracking-normal text-slate-500">(opcional)</span>
@@ -589,7 +601,9 @@ export default function MesaClientApp() {
             className="mt-2 w-full resize-y rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-500 focus:border-emerald-500/50 disabled:opacity-50"
           />
         </div>
+        )}
 
+        {viewOnly ? null : (
         <div className="sticky bottom-0 border-t border-slate-800 bg-slate-950/95 py-4 backdrop-blur">
           <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/20 px-4 py-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -612,6 +626,7 @@ export default function MesaClientApp() {
 
           </div>
         </div>
+        )}
       </main>
 
       {toast ? (

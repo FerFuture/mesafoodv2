@@ -32,6 +32,8 @@ export default function MesaQrLinksPanel({
   const [qrPreviewUrl, setQrPreviewUrl] = useState("");
   const [downloadingSingle, setDownloadingSingle] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
+  const [viewQrPreviewUrl, setViewQrPreviewUrl] = useState("");
+  const [downloadingViewQr, setDownloadingViewQr] = useState(false);
   const [savingBlockedTable, setSavingBlockedTable] = useState(null);
   const [blockedTablesFlash, setBlockedTablesFlash] = useState("");
 
@@ -46,6 +48,13 @@ export default function MesaQrLinksPanel({
     [restaurantMetadata, n]
   );
   const previewTableBlocked = blockedTables.includes(previewTable);
+
+  const viewMenuUrl = useMemo(() => {
+    const rid = String(restaurantId || "").trim();
+    const base = String(baseUrl || "").replace(/\/$/, "");
+    if (!rid || !base || !qrModuleEnabled) return "";
+    return `${base}/carta?r=${encodeURIComponent(rid)}&ver=1`;
+  }, [restaurantId, baseUrl, qrModuleEnabled]);
 
   useEffect(() => {
     if (n >= 1 && (previewTable < 1 || previewTable > n)) {
@@ -99,6 +108,29 @@ export default function MesaQrLinksPanel({
     };
   }, [rows, previewTable]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!viewMenuUrl) {
+      setViewQrPreviewUrl("");
+      return undefined;
+    }
+    QRCode.toDataURL(viewMenuUrl, {
+      margin: 1,
+      width: 240,
+      errorCorrectionLevel: "M",
+      color: { dark: "#0f172a", light: "#ffffff" }
+    })
+      .then((dataUrl) => {
+        if (!cancelled) setViewQrPreviewUrl(dataUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setViewQrPreviewUrl("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewMenuUrl]);
+
   async function copy(text) {
     try {
       await navigator.clipboard.writeText(text);
@@ -151,6 +183,29 @@ export default function MesaQrLinksPanel({
       setBlockedTablesFlash(`No se pudo actualizar la mesa ${previewTable}: ${error?.message || error}`);
     } finally {
       setSavingBlockedTable(null);
+    }
+  }
+
+  async function downloadViewQr() {
+    if (!viewMenuUrl || downloadingViewQr) return;
+    setDownloadingViewQr(true);
+    try {
+      const dataUrl = await buildQrDataUrl(viewMenuUrl);
+      const pdf = new jsPDF({ unit: "mm", format: "a4" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const qrSize = 90;
+      const qrX = (pageWidth - qrSize) / 2;
+      const qrY = 40;
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(18);
+      pdf.text("Carta", pageWidth / 2, 24, { align: "center" });
+      pdf.addImage(dataUrl, "PNG", qrX, qrY, qrSize, qrSize);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(12);
+      pdf.text("Escanea para ver la carta", pageWidth / 2, qrY + qrSize + 12, { align: "center" });
+      pdf.save(`${baseFilename("qr-carta")}.pdf`);
+    } finally {
+      setDownloadingViewQr(false);
     }
   }
 
@@ -315,6 +370,51 @@ export default function MesaQrLinksPanel({
         >
           {blockedTablesFlash}
         </p>
+      ) : null}
+
+      {viewMenuUrl ? (
+        <div className="flex flex-col gap-4 rounded-lg border border-violet-500/30 bg-violet-950/20 p-4 sm:flex-row sm:items-start">
+          <div className="space-y-2">
+            <p className="text-sm font-semibold text-violet-100">QR solo para ver la carta</p>
+            <p className="max-w-md text-xs leading-relaxed text-slate-400">
+              Este código muestra el menú y los precios. No pide mesa y no envía nada a cocina.
+            </p>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => copy(viewMenuUrl)}
+                className="rounded border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
+              >
+                Copiar enlace
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void downloadViewQr();
+                }}
+                disabled={downloadingViewQr}
+                className="rounded border border-violet-400/50 bg-violet-500/10 px-3 py-1.5 text-xs font-medium text-violet-100 hover:bg-violet-500/20 disabled:opacity-50"
+              >
+                {downloadingViewQr ? "Generando..." : "Descargar QR"}
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-col items-center gap-2 sm:ml-auto">
+            {viewQrPreviewUrl ? (
+              <img
+                src={viewQrPreviewUrl}
+                alt="QR para ver la carta"
+                className="rounded-lg border border-slate-700 bg-white p-2"
+                width={180}
+                height={180}
+              />
+            ) : (
+              <div className="flex h-[180px] w-[180px] items-center justify-center rounded-lg border border-dashed border-slate-700 text-xs text-slate-500">
+                Generando...
+              </div>
+            )}
+          </div>
+        </div>
       ) : null}
 
       {!restaurantId || n < 1 ? (
