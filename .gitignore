@@ -1,0 +1,13 @@
+node_modules/
+.cursor/
+# Node portable (solo para npm install en entornos sin Node global)
+dashboard/.node-portable/
+.env
+.env.*
+!.env.example
+.wwebjs_auth/
+.wwebjs_cache/
+dist/
+build/
+*.log
+.DS_Store
