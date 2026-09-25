@@ -458,6 +458,7 @@ export default function AdminApp({ onLogout }) {
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
   const [configFlash, setConfigFlash] = useState("");
+  const [clearingOrders, setClearingOrders] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState(null);
   const confirmResolverRef = useRef(null);
   const ordersCalendarDayRef = useRef(localDateKey());
@@ -487,6 +488,47 @@ export default function AdminApp({ onLogout }) {
       confirmResolverRef.current = resolve;
       setConfirmDialog({ title, message, confirmLabel, cancelLabel, tone });
     });
+  }
+
+  async function clearOrdersAndStats() {
+    if (!restaurantId || clearingOrders) return;
+    const ok = await requestConfirm({
+      title: "Borrar pedidos y estadísticas",
+      message:
+        "Se eliminan todos los pedidos de este local. Las estadísticas vuelven a cero. El menú, los usuarios y la configuración quedan igual. No se puede deshacer.",
+      confirmLabel: "Sí, borrar pedidos",
+      cancelLabel: "Cancelar",
+      tone: "danger"
+    });
+    if (!ok) return;
+    setClearingOrders(true);
+    setError("");
+    setConfigFlash("");
+    const { error: deleteError } = await supabase.from("orders").delete().eq("restaurant_id", restaurantId);
+    if (deleteError) {
+      setError(`No se pudieron borrar los pedidos: ${deleteError.message}`);
+      setClearingOrders(false);
+      return;
+    }
+    const metadata =
+      restaurantMetadata && typeof restaurantMetadata === "object" && !Array.isArray(restaurantMetadata)
+        ? { ...restaurantMetadata }
+        : {};
+    delete metadata.mesa_qr_live_tables;
+    const { error: metaError } = await supabase
+      .from("restaurants")
+      .update({ metadata })
+      .eq("id", restaurantId);
+    if (metaError) {
+      setError(`Los pedidos se borraron, pero no se cerraron los QR de las mesas: ${metaError.message}`);
+    } else {
+      setRestaurantMetadata(metadata);
+    }
+    setOrders([]);
+    setOrdersTotal(0);
+    setOrdersHasMore(false);
+    setConfigFlash("Pedidos eliminados. Las estadísticas de este local quedaron en cero.");
+    setClearingOrders(false);
   }
 
   function handleConfirmDialog(value) {
@@ -3246,6 +3288,7 @@ export default function AdminApp({ onLogout }) {
                 Cargando configuración...
               </div>
             ) : (
+              <>
               <form
                 onSubmit={saveRestaurantConfig}
                 className="space-y-4 rounded-xl border border-slate-700 bg-slate-900 p-5"
@@ -3561,6 +3604,24 @@ export default function AdminApp({ onLogout }) {
                   </button>
                 </div>
               </form>
+              <div className="rounded-xl border border-rose-500/35 bg-rose-950/20 p-5">
+                <h2 className="text-sm font-semibold text-rose-100">Pedidos y estadísticas</h2>
+                <p className="mt-1 text-xs leading-relaxed text-slate-400">
+                  Borra solo los pedidos de este local. Las estadísticas salen de esos pedidos, así que vuelven a cero.
+                  No toca el menú, los usuarios ni el local.
+                </p>
+                <button
+                  type="button"
+                  disabled={clearingOrders || !restaurantId}
+                  onClick={() => {
+                    void clearOrdersAndStats();
+                  }}
+                  className="mt-4 rounded-lg bg-rose-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-rose-400 disabled:opacity-50"
+                >
+                  {clearingOrders ? "Borrando…" : "Borrar pedidos y reiniciar estadísticas"}
+                </button>
+              </div>
+              </>
             )}
           </section>
         )}
