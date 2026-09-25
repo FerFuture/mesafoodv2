@@ -17,7 +17,7 @@ function readStream(req) {
   });
 }
 
-async function getRawBody(req) {
+export async function getRawBody(req) {
   if (req.body != null && typeof req.body === "object" && !Buffer.isBuffer(req.body)) {
     return req.body;
   }
@@ -29,7 +29,7 @@ async function getRawBody(req) {
   return JSON.parse(fromStream);
 }
 
-function envFirst(...names) {
+export function envFirst(...names) {
   for (const name of names) {
     const value = String(process.env[name] || "").trim();
     if (value) return value;
@@ -44,11 +44,26 @@ function supabaseConfig() {
   };
 }
 
-function tokenMatches(restaurantId, tableNumber, token, secret) {
+export function tokenMatches(restaurantId, tableNumber, token, secret) {
   const expected = crypto
     .createHmac("sha256", secret)
     .update(`${restaurantId}|${tableNumber}`)
     .digest("hex");
+  const a = Buffer.from(String(token || "").trim(), "hex");
+  const b = Buffer.from(expected, "hex");
+  if (a.length === 0 || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+export function signVisitToken(secret, restaurantId, tableNumber, openedAt) {
+  return crypto
+    .createHmac("sha256", secret)
+    .update(`${restaurantId}|${tableNumber}|${openedAt}`)
+    .digest("hex");
+}
+
+function visitTokenMatches(secret, restaurantId, tableNumber, openedAt, token) {
+  const expected = signVisitToken(secret, restaurantId, tableNumber, openedAt);
   const a = Buffer.from(String(token || "").trim(), "hex");
   const b = Buffer.from(expected, "hex");
   if (a.length === 0 || a.length !== b.length) return false;
@@ -135,6 +150,31 @@ export default async function handler(req, res) {
     }
     if (!tokenMatches(restaurantId, tableNumber, mesaToken, secret)) {
       return res.status(403).json({ error: "Token de mesa inválido. Volvé a escanear el QR." });
+    }
+
+    const openedAt = String(body?.openedAt || "").trim();
+    const visitToken = String(body?.visitToken || "").trim();
+    const openedMs = Date.parse(openedAt);
+    if (!openedAt || !Number.isFinite(openedMs)) {
+      return res.status(400).json({
+        error: "Volvé a escanear el QR de la mesa.",
+        code: "visit_required"
+      });
+    }
+    if (!visitTokenMatches(secret, restaurantId, tableNumber, openedAt, visitToken)) {
+      return res.status(403).json({
+        error: "La visita no es válida. Escaneá de nuevo el QR de la mesa.",
+        code: "visit_invalid"
+      });
+    }
+    const paidAfterOpen = await supabaseFetch(
+      `orders?restaurant_id=eq.${encodeURIComponent(restaurantId)}&table_number=eq.${tableNumber}&fulfillment_type=eq.mesa&payment_status=in.(paid,approved)&payment_paid_at=gte.${encodeURIComponent(new Date(openedMs).toISOString())}&select=id&limit=1`
+    );
+    if (Array.isArray(paidAfterOpen) && paidAfterOpen.length > 0) {
+      return res.status(409).json({
+        error: "La cuenta de esta mesa ya se cerró. Si seguís en la mesa, escaneá el QR otra vez.",
+        code: "visit_closed"
+      });
     }
 
     const restaurants = await supabaseFetch(

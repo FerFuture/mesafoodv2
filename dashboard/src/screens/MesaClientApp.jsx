@@ -106,6 +106,9 @@ export default function MesaClientApp() {
 
   const [cartById, setCartById] = useState({});
   const [observacion, setObservacion] = useState("");
+  const [visit, setVisit] = useState(null);
+  const [visitError, setVisitError] = useState("");
+  const [accountClosed, setAccountClosed] = useState(false);
   const [toast, setToast] = useState(null);
   const toastTimerRef = useRef(null);
 
@@ -222,6 +225,44 @@ export default function MesaClientApp() {
   }, [restaurantId]);
 
   useEffect(() => {
+    if (viewOnly || !restaurantId || !parsedTableNumber || !mesaTokenFromUrl) return undefined;
+    let cancelled = false;
+    setVisit(null);
+    setVisitError("");
+    setAccountClosed(false);
+
+    async function openVisit() {
+      try {
+        const origin = window.location.origin.replace(/\/$/, "");
+        const res = await fetchWithTimeout(`${origin}/api/mesa/session`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            restaurantId,
+            tableNumber: parsedTableNumber,
+            mesaToken: mesaTokenFromUrl
+          })
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(data?.error || `Error HTTP ${res.status}`);
+        if (!cancelled) {
+          setVisit({
+            openedAt: String(data?.openedAt || ""),
+            visitToken: String(data?.visitToken || "")
+          });
+        }
+      } catch (e) {
+        if (!cancelled) setVisitError(e?.message || "No se pudo abrir la mesa");
+      }
+    }
+
+    openVisit();
+    return () => {
+      cancelled = true;
+    };
+  }, [viewOnly, restaurantId, parsedTableNumber, mesaTokenFromUrl]);
+
+  useEffect(() => {
     if (!toast) return;
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     toastTimerRef.current = window.setTimeout(() => setToast(null), 4000);
@@ -277,7 +318,9 @@ export default function MesaClientApp() {
         tableNumber: tableNum,
         items: cartLines,
         mesaToken: mesaTokenFromUrl || "",
-        observacion: String(observacion || "").trim()
+        observacion: String(observacion || "").trim(),
+        openedAt: visit?.openedAt || "",
+        visitToken: visit?.visitToken || ""
       };
       const apiCandidates = buildMesaApiCandidates();
       let res = null;
@@ -312,6 +355,7 @@ export default function MesaClientApp() {
 
       const data = await res.json().catch(() => null);
       if (!res.ok) {
+        if (data?.code === "visit_closed") setAccountClosed(true);
         const msg = data?.error || `Error HTTP ${res.status}`;
         throw new Error(msg);
       }
@@ -343,6 +387,14 @@ export default function MesaClientApp() {
     }
     if (!restaurantId) {
       setError("Falta configuración del restaurante.");
+      return;
+    }
+    if (accountClosed) {
+      setError("La cuenta de esta mesa ya se cerró. Si seguís en la mesa, escaneá el QR otra vez.");
+      return;
+    }
+    if (!visit?.openedAt || !visit?.visitToken) {
+      setError("Todavía no se abrió la visita de la mesa. Esperá un segundo o volvé a escanear el QR.");
       return;
     }
     if (cartLines.length === 0) {
@@ -497,6 +549,18 @@ export default function MesaClientApp() {
       </header>
 
       <main className="mx-auto max-w-3xl px-4 py-5 space-y-5">
+        {visitError && !accountClosed ? (
+          <div className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-sm text-rose-200" role="alert">
+            {visitError}
+          </div>
+        ) : null}
+
+        {accountClosed ? (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-3 text-sm text-amber-100" role="status">
+            La cuenta de esta mesa ya se cerró. Desde este celular no se puede seguir pidiendo. Si seguís en la mesa, escaneá el QR otra vez.
+          </div>
+        ) : null}
+
         {error ? (
           <div className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-sm text-rose-200" role="alert">
             {error}
@@ -561,7 +625,7 @@ export default function MesaClientApp() {
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          disabled={q < 1 || submitting}
+                          disabled={q < 1 || submitting || accountClosed}
                           onClick={() => removeFromCart(item.id)}
                           className="h-10 w-10 rounded-lg border border-slate-600 text-lg leading-none text-slate-300 hover:bg-slate-800 disabled:opacity-30"
                         >
@@ -570,7 +634,7 @@ export default function MesaClientApp() {
                         <span className="w-8 text-center tabular-nums text-lg font-semibold">{q}</span>
                         <button
                           type="button"
-                          disabled={submitting}
+                          disabled={submitting || accountClosed}
                           onClick={() => addToCart(item.id)}
                           className="h-10 w-10 rounded-lg bg-emerald-600 text-lg font-semibold leading-none text-white hover:bg-emerald-500 disabled:opacity-50"
                         >
@@ -615,7 +679,7 @@ export default function MesaClientApp() {
               <div className="flex flex-wrap gap-2 items-center">
                 <button
                   type="button"
-                  disabled={submitting || cartLines.length === 0}
+                  disabled={submitting || accountClosed || cartLines.length === 0 || !visit?.visitToken}
                   onClick={() => submitOrder()}
                   className="rounded-lg bg-emerald-500 px-6 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
                 >
