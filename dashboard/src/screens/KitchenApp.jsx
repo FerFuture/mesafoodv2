@@ -210,7 +210,7 @@ export default function KitchenApp({ onLogout }) {
 
   const queue = useMemo(
     () => orders.filter((o) => orderInKitchenQueue(o)).sort(
-      (a, b) => new Date(a.created_at) - new Date(b.created_at)
+      (a, b) => new Date(b.created_at) - new Date(a.created_at)
     ),
     [orders]
   );
