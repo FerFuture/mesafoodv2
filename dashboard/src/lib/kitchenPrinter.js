@@ -5,15 +5,28 @@ import {
   tableNumberLabel,
   waiterNameFromMozoNotes
 } from "./format";
+import { QZ_CERTIFICATE } from "./qzCertificate";
 
 let connectPromise = null;
 
-function allowUnsignedQz() {
+function trustKitchenQz() {
   qz.security.setCertificatePromise((resolve) => {
-    resolve();
+    resolve(QZ_CERTIFICATE);
   });
-  qz.security.setSignaturePromise(() => (resolve) => {
-    resolve();
+  qz.security.setSignatureAlgorithm("SHA512");
+  qz.security.setSignaturePromise((toSign) => (resolve, reject) => {
+    fetch("/api/qz/sign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request: toSign }),
+      cache: "no-store"
+    })
+      .then(async (response) => {
+        const text = (await response.text()).trim();
+        if (!response.ok || !text) reject(text || "No se pudo firmar la impresión");
+        else resolve(text);
+      })
+      .catch(reject);
   });
 }
 
@@ -26,7 +39,7 @@ export function qzIsConnected() {
 }
 
 export async function connectKitchenPrinter() {
-  allowUnsignedQz();
+  trustKitchenQz();
   if (qzIsConnected()) return;
   if (!connectPromise) {
     connectPromise = qz.websocket.connect().finally(() => {
