@@ -22,6 +22,22 @@ function printerStorageKey(restaurantId, field) {
   return `mesafood-kitchen-${field}:${restaurantId}`;
 }
 
+const RECENT_TICKET_MS = 15 * 60 * 1000;
+
+function readPrintedIds(restaurantId) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(printerStorageKey(restaurantId, "printed")) || "[]");
+    return new Set(Array.isArray(raw) ? raw : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function rememberPrintedId(restaurantId, orderId) {
+  const ids = [...readPrintedIds(restaurantId), orderId].slice(-200);
+  localStorage.setItem(printerStorageKey(restaurantId, "printed"), JSON.stringify(ids));
+}
+
 export default function KitchenApp({ onLogout }) {
   const [restaurantId, setRestaurantId] = useState("");
   const [restaurantName, setRestaurantName] = useState("");
@@ -34,6 +50,7 @@ export default function KitchenApp({ onLogout }) {
   const [printerStatus, setPrinterStatus] = useState("Conectando con QZ Tray…");
   const [printingId, setPrintingId] = useState("");
   const printedIdsRef = useRef(new Set());
+  const listeningRef = useRef(false);
   const printerNameRef = useRef("");
   const paperWidthRef = useRef("80");
   const restaurantNameRef = useRef("");
@@ -111,7 +128,6 @@ export default function KitchenApp({ onLogout }) {
         setLoading(false);
         return;
       }
-      for (const order of data || []) printedIdsRef.current.add(order.id);
       setOrders(data || []);
       setLoading(false);
     }
@@ -136,10 +152,7 @@ export default function KitchenApp({ onLogout }) {
               const next = [...prev, row].sort(
                 (a, b) => new Date(a.created_at) - new Date(b.created_at)
               );
-              if (orderInKitchenQueue(row)) {
-                playNotification();
-                void sendTicket(row);
-              }
+              if (orderInKitchenQueue(row)) playNotification();
               return next;
             });
             return;
@@ -156,7 +169,6 @@ export default function KitchenApp({ onLogout }) {
                   );
               if (orderInKitchenQueue(row) && (!oldRow || !orderInKitchenQueue(oldRow))) {
                 playNotification();
-                void sendTicket(row);
               }
               return next;
             });
@@ -186,6 +198,7 @@ export default function KitchenApp({ onLogout }) {
         restaurantName: restaurantNameRef.current,
         order
       });
+      if (restaurantId) rememberPrintedId(restaurantId, order.id);
       setPrinterStatus("Ticket enviado a la comanda");
     } catch (printError) {
       printedIdsRef.current.delete(order.id);
@@ -201,6 +214,23 @@ export default function KitchenApp({ onLogout }) {
     ),
     [orders]
   );
+
+  useEffect(() => {
+    if (loading || !restaurantId || !printerName) return;
+    const alreadyPrinted = readPrintedIds(restaurantId);
+    for (const order of queue) {
+      if (printedIdsRef.current.has(order.id) || alreadyPrinted.has(order.id)) continue;
+      const age = Date.now() - new Date(order.created_at).getTime();
+      const recent = Number.isFinite(age) && age >= -5000 && age < RECENT_TICKET_MS;
+      if (!listeningRef.current && !recent) {
+        rememberPrintedId(restaurantId, order.id);
+        printedIdsRef.current.add(order.id);
+        continue;
+      }
+      void sendTicket(order);
+    }
+    listeningRef.current = true;
+  }, [queue, loading, restaurantId, printerName]);
 
   return (
     <div className="dark min-h-screen bg-slate-950 text-slate-100">

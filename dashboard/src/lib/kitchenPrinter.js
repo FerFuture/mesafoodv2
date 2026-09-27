@@ -43,43 +43,49 @@ export async function listKitchenPrinters() {
   return found ? [found] : [];
 }
 
-function lineWidth(widthMm) {
-  return Number(widthMm) <= 58 ? 32 : 48;
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
-function clip(text, width) {
-  const value = String(text || "").replace(/\s+/g, " ").trim();
-  if (value.length <= width) return value;
-  return `${value.slice(0, Math.max(0, width - 3))}...`;
-}
-
-function ticketText(order, restaurantName, widthMm) {
-  const width = lineWidth(widthMm);
-  const rule = "-".repeat(width);
+function ticketHtml(order, restaurantName, widthMm) {
   const mesa = tableNumberLabel(order);
   const rows = groupOrderItemRows(order);
   const observacion = orderObservacionText(order);
   const mozo = waiterNameFromMozoNotes(order?.notes);
   const when = order?.created_at ? new Date(order.created_at).toLocaleString("es-AR") : "";
   const title = mesa ? `MESA ${mesa}` : "PEDIDO";
-  const lines = [
-    clip(restaurantName || "Cocina", width),
-    when,
-    rule,
-    title,
-    `#${String(order?.id || "").slice(0, 8)}`,
-    rule
-  ];
-  if (!rows.length) lines.push("(sin items)");
-  for (const row of rows) {
-    const qty = row.count > 1 ? `${row.count} x ` : "1 x ";
-    lines.push(clip(`${qty}${row.name}`, width));
-  }
-  if (observacion) {
-    lines.push(rule, clip(`OBS: ${observacion}`, width));
-  }
-  if (mozo) lines.push(clip(`Mozo: ${mozo}`, width));
-  return lines.join("\n");
+  const items = rows.length
+    ? rows
+        .map((row) => {
+          const qty = row.count > 1 ? `${row.count} x ` : "1 x ";
+          return `<div class="item">${escapeHtml(`${qty}${row.name}`)}</div>`;
+        })
+        .join("")
+    : `<div class="item">(sin items)</div>`;
+  const extra = [
+    observacion ? `<div class="obs">OBS: ${escapeHtml(observacion)}</div>` : "",
+    mozo ? `<div class="meta">Mozo: ${escapeHtml(mozo)}</div>` : ""
+  ].join("");
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    html, body { margin: 0; padding: 0; width: ${Number(widthMm) <= 58 ? 48 : 72}mm; }
+    body { font-family: Arial, sans-serif; color: #000; }
+    h1 { font-size: 18px; text-align: center; margin: 0 0 4px; }
+    .meta { text-align: center; font-size: 11px; margin: 0; }
+    .rule { border-top: 1px dashed #000; margin: 6px 0; }
+    .item { font-size: 16px; font-weight: 700; margin: 3px 0; }
+    .obs { font-size: 14px; font-weight: 700; margin-top: 6px; }
+  </style></head><body>
+    <h1>${escapeHtml(title)}</h1>
+    <p class="meta">${escapeHtml(restaurantName || "Cocina")}</p>
+    <p class="meta">${escapeHtml(when)}</p>
+    <div class="rule"></div>
+    ${items}
+    <div class="rule"></div>
+    ${extra}
+  </body></html>`;
 }
 
 export async function printKitchenTicket({ printer, widthMm, restaurantName, order }) {
@@ -90,8 +96,23 @@ export async function printKitchenTicket({ printer, widthMm, restaurantName, ord
     throw error;
   }
   await connectKitchenPrinter();
-  const config = qz.configs.create(name, { encoding: "Cp1252" });
-  const body = ticketText(order, restaurantName, widthMm);
-  const data = `\x1B@\x1Ba\x00${body}\n\n\n\x1DV\x42\x00`;
-  await qz.print(config, [{ type: "raw", format: "plain", data }]);
+  const mm = Number(widthMm) <= 58 ? 58 : 80;
+  const rows = groupOrderItemRows(order);
+  const height = Math.min(280, 70 + rows.length * 10);
+  const config = qz.configs.create(name, {
+    units: "mm",
+    size: { width: mm, height },
+    margins: 0,
+    colorType: "blackwhite",
+    scaleContent: true,
+    interpolation: "nearest-neighbor"
+  });
+  await qz.print(config, [
+    {
+      type: "pixel",
+      format: "html",
+      flavor: "plain",
+      data: ticketHtml(order, restaurantName, mm)
+    }
+  ]);
 }
