@@ -107,12 +107,23 @@ export async function printKitchenTicket({ printer, widthMm, restaurantName, ord
     scaleContent: true,
     interpolation: "nearest-neighbor"
   });
-  await qz.print(config, [
-    {
-      type: "pixel",
-      format: "html",
-      flavor: "plain",
-      data: ticketHtml(order, restaurantName, mm)
-    }
-  ]);
+  const ticket = {
+    type: "pixel",
+    format: "html",
+    flavor: "plain",
+    data: ticketHtml(order, restaurantName, mm)
+  };
+  await qz.print(config, [ticket]);
+  try {
+    await qz.print(config, [
+      {
+        type: "raw",
+        format: "command",
+        flavor: "hex",
+        data: "1B64041D5601"
+      }
+    ]);
+  } catch {
+    // El ticket ya salió. Si el driver ignora el corte, no se vuelve a imprimir.
+  }
 }
