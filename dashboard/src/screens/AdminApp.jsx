@@ -42,7 +42,7 @@ import {
 import DashboardUsersPanel from "./DashboardUsersPanel";
 import MaestroPanel from "./MaestroPanel";
 import MesaQrLinksPanel from "../components/MesaQrLinksPanel";
-import { setMesaQrLive } from "../lib/mesaQrLive";
+import { requestBillPrint, setMesaQrLive } from "../lib/mesaQrLive";
 import StockManagerPanel from "../components/StockManagerPanel";
 import OrdersDateRangeCalendar from "../components/OrdersDateRangeCalendar";
 import { fetchRestaurantForDashboard } from "../lib/restaurantTenant";
@@ -406,6 +406,8 @@ export default function AdminApp({ onLogout }) {
   const [loadingMenu, setLoadingMenu] = useState(true);
   const [savingItemId, setSavingItemId] = useState(null);
   const [savingOrderId, setSavingOrderId] = useState(null);
+  const [billBusyId, setBillBusyId] = useState("");
+  const [billNotice, setBillNotice] = useState({ id: "", text: "" });
   const [showAddForm, setShowAddForm] = useState(false);
   const [menuSearchQuery, setMenuSearchQuery] = useState("");
   const [addingItem, setAddingItem] = useState(false);
@@ -1181,6 +1183,25 @@ export default function AdminApp({ onLogout }) {
       }
     }
     setSavingOrderId(null);
+  }
+
+  async function sendAccountBill(accountOrders) {
+    const ids = (accountOrders || []).map((row) => row.id).filter(Boolean);
+    if (!ids.length || !restaurantId) return;
+    setBillNotice({ id: "", text: "" });
+    setBillBusyId(ids[0]);
+    const result = await requestBillPrint(supabase, restaurantId, {
+      tableNumber: tableNumberLabel(accountOrders[0]),
+      orderIds: ids,
+      requestedBy: getSession()?.username || "encargado"
+    });
+    setBillBusyId("");
+    setBillNotice({
+      id: ids[0],
+      text: result.error
+        ? result.error.message || "No se pudo enviar la cuenta"
+        : "Cuenta enviada a la impresora"
+    });
   }
 
   async function confirmAccountCashPayment(accountOrders) {
@@ -2436,6 +2457,19 @@ export default function AdminApp({ onLogout }) {
                       <span className={tableOrder ? "text-lg font-semibold text-emerald-200" : ""}>
                         {currency(tableOrder ? accountTotal : subtotalForOrder(order))}
                       </span>
+                      {tableOrder ? (
+                        <button
+                          type="button"
+                          disabled={billBusyId === order.id}
+                          onClick={() => sendAccountBill(accountOrders)}
+                          className="ml-3 rounded-lg border border-slate-600 px-3 py-1 text-xs font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                        >
+                          {billBusyId === order.id ? "Enviando…" : "Imprimir cuenta"}
+                        </button>
+                      ) : null}
+                      {tableOrder && billNotice.id === order.id ? (
+                        <span className="mt-1 block text-xs text-slate-400">{billNotice.text}</span>
+                      ) : null}
                     </p>
                     {tableOrder ? null : (
                       <>

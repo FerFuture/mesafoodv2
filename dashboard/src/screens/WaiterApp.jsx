@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabaseClient";
 import { getSession } from "../lib/auth";
 import { fetchRestaurantForDashboard } from "../lib/restaurantTenant";
-import { liveMesaTables, setMesaQrLive } from "../lib/mesaQrLive";
+import { liveMesaTables, requestBillPrint, setMesaQrLive } from "../lib/mesaQrLive";
 import {
   currency,
   formatDateTime,
@@ -117,6 +117,8 @@ export default function WaiterApp({ onLogout }) {
   const addressInputRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [billNotice, setBillNotice] = useState("");
+  const [billBusy, setBillBusy] = useState(false);
   const [savingOrderId, setSavingOrderId] = useState(null);
   const [error, setError] = useState("");
   const [tab, setTab] = useState("order");
@@ -1220,6 +1222,28 @@ export default function WaiterApp({ onLogout }) {
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
+                          disabled={billBusy}
+                          onClick={async () => {
+                            setBillNotice("");
+                            setBillBusy(true);
+                            const result = await requestBillPrint(supabase, restaurantId, {
+                              tableNumber: selectedMesa,
+                              orderIds: list.map((order) => order.id),
+                              requestedBy: getSession()?.username || "mozo"
+                            });
+                            setBillBusy(false);
+                            setBillNotice(
+                              result.error
+                                ? result.error.message || "No se pudo enviar la cuenta"
+                                : "Cuenta enviada a la impresora"
+                            );
+                          }}
+                          className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                        >
+                          {billBusy ? "Enviando…" : "Imprimir cuenta"}
+                        </button>
+                        <button
+                          type="button"
                           disabled={savingQrTable === selectedMesa}
                           onClick={() => toggleTableQr(selectedMesa, !liveTables.includes(selectedMesa))}
                           className="rounded-lg border border-violet-400/50 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/10 disabled:opacity-50"
@@ -1251,6 +1275,7 @@ export default function WaiterApp({ onLogout }) {
                         </button>
                       </div>
                     </div>
+                    {billNotice ? <p className="mt-2 text-xs text-slate-400">{billNotice}</p> : null}
                   </article>
                 );
               })()

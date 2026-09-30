@@ -14,7 +14,7 @@ import {
   playNotification,
   tableNumberLabel
 } from "../lib/format";
-import { listKitchenPrinters, printKitchenTicket } from "../lib/kitchenPrinter";
+import { listKitchenPrinters, printCustomerBill, printKitchenTicket } from "../lib/kitchenPrinter";
 
 const HISTORY_HOURS = 18;
 
@@ -24,18 +24,18 @@ function printerStorageKey(restaurantId, field) {
 
 const RECENT_TICKET_MS = 15 * 60 * 1000;
 
-function readPrintedIds(restaurantId) {
+function readPrintedIds(restaurantId, field = "printed") {
   try {
-    const raw = JSON.parse(localStorage.getItem(printerStorageKey(restaurantId, "printed")) || "[]");
+    const raw = JSON.parse(localStorage.getItem(printerStorageKey(restaurantId, field)) || "[]");
     return new Set(Array.isArray(raw) ? raw : []);
   } catch {
     return new Set();
   }
 }
 
-function rememberPrintedId(restaurantId, orderId) {
-  const ids = [...readPrintedIds(restaurantId), orderId].slice(-200);
-  localStorage.setItem(printerStorageKey(restaurantId, "printed"), JSON.stringify(ids));
+function rememberPrintedId(restaurantId, orderId, field = "printed") {
+  const ids = [...readPrintedIds(restaurantId, field), orderId].slice(-200);
+  localStorage.setItem(printerStorageKey(restaurantId, field), JSON.stringify(ids));
 }
 
 export default function KitchenApp({ onLogout }) {
@@ -46,14 +46,19 @@ export default function KitchenApp({ onLogout }) {
   const [error, setError] = useState("");
   const [printers, setPrinters] = useState([]);
   const [printerName, setPrinterName] = useState("");
+  const [billPrinterName, setBillPrinterName] = useState("");
   const [paperWidth, setPaperWidth] = useState("80");
   const [printerStatus, setPrinterStatus] = useState("Conectando con QZ Tray…");
   const [printingId, setPrintingId] = useState("");
   const printedIdsRef = useRef(new Set());
   const listeningRef = useRef(false);
   const printerNameRef = useRef("");
+  const billPrinterRef = useRef("");
   const paperWidthRef = useRef("80");
   const restaurantNameRef = useRef("");
+  const ordersRef = useRef([]);
+  const billPrintedRef = useRef(new Set());
+  const billListeningRef = useRef(false);
 
   useEffect(() => {
     async function loadRestaurant() {
@@ -70,10 +75,13 @@ export default function KitchenApp({ onLogout }) {
       setRestaurantName(data.name || "");
       restaurantNameRef.current = data.name || "";
       const savedPrinter = localStorage.getItem(printerStorageKey(data.id, "printer")) || "";
+      const savedBillPrinter = localStorage.getItem(printerStorageKey(data.id, "bill-printer")) || "";
       const savedWidth = localStorage.getItem(printerStorageKey(data.id, "width")) || "80";
       setPrinterName(savedPrinter);
+      setBillPrinterName(savedBillPrinter);
       setPaperWidth(savedWidth === "58" ? "58" : "80");
       printerNameRef.current = savedPrinter;
+      billPrinterRef.current = savedBillPrinter;
       paperWidthRef.current = savedWidth === "58" ? "58" : "80";
     }
     loadRestaurant();
@@ -214,6 +222,75 @@ export default function KitchenApp({ onLogout }) {
     ),
     [orders]
   );
+  ordersRef.current = orders;
+
+  useEffect(() => {
+    if (!restaurantId) return undefined;
+    let cancelled = false;
+
+    async function printBill(job) {
+      if (!job?.id || billPrintedRef.current.has(job.id)) return;
+      const already = readPrintedIds(restaurantId, "bills");
+      if (already.has(job.id)) {
+        billPrintedRef.current.add(job.id);
+        return;
+      }
+      const age = Date.now() - new Date(job.at).getTime();
+      const recent = Number.isFinite(age) && age >= -5000 && age < RECENT_TICKET_MS;
+      if (!billListeningRef.current && !recent) {
+        rememberPrintedId(restaurantId, job.id, "bills");
+        billPrintedRef.current.add(job.id);
+        return;
+      }
+      if (!billPrinterRef.current) {
+        setPrinterStatus("Elegí la impresora de cuentas");
+        return;
+      }
+      const ids = Array.isArray(job.orderIds) ? job.orderIds : [];
+      let rows = ordersRef.current.filter((order) => ids.includes(order.id));
+      if (rows.length < ids.length) {
+        const { data } = await supabase.from("orders").select("*").in("id", ids);
+        if (cancelled) return;
+        rows = data || rows;
+      }
+      billPrintedRef.current.add(job.id);
+      try {
+        await printCustomerBill({
+          printer: billPrinterRef.current,
+          widthMm: paperWidthRef.current,
+          restaurantName: restaurantNameRef.current,
+          orders: rows,
+          tableNumber: job.tableNumber
+        });
+        rememberPrintedId(restaurantId, job.id, "bills");
+        setPrinterStatus("Cuenta enviada a la impresora");
+      } catch (printError) {
+        billPrintedRef.current.delete(job.id);
+        setError(`No se pudo imprimir la cuenta: ${printError?.message || printError}`);
+      }
+    }
+
+    async function pullBills() {
+      const { data } = await supabase
+        .from("restaurants")
+        .select("metadata")
+        .eq("id", restaurantId)
+        .maybeSingle();
+      if (cancelled) return;
+      const jobs = Array.isArray(data?.metadata?.bill_print_jobs) ? data.metadata.bill_print_jobs : [];
+      for (const job of jobs) {
+        await printBill(job);
+      }
+      billListeningRef.current = true;
+    }
+
+    pullBills();
+    const timer = setInterval(pullBills, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [restaurantId, billPrinterName]);
 
   useEffect(() => {
     if (loading || !restaurantId || !printerName) return;
@@ -243,7 +320,7 @@ export default function KitchenApp({ onLogout }) {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <label className="text-xs text-slate-400">
-              Impresora
+              Comanda
               <select
                 value={printerName}
                 onChange={(event) => {
@@ -259,6 +336,28 @@ export default function KitchenApp({ onLogout }) {
                 <option value="">Elegir</option>
                 {printers.map((name) => (
                   <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs text-slate-400">
+              Cuentas
+              <select
+                value={billPrinterName}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setBillPrinterName(next);
+                  billPrinterRef.current = next;
+                  if (restaurantId) {
+                    localStorage.setItem(printerStorageKey(restaurantId, "bill-printer"), next);
+                  }
+                }}
+                className="ml-2 h-9 rounded-lg border border-slate-600 bg-slate-950 px-2 text-sm text-slate-100"
+              >
+                <option value="">Elegir</option>
+                {printers.map((name) => (
+                  <option key={`bill-${name}`} value={name}>
                     {name}
                   </option>
                 ))}

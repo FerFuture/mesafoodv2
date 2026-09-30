@@ -1,5 +1,6 @@
 import qz from "qz-tray";
 import {
+  currency,
   groupOrderItemRows,
   orderObservacionText,
   tableNumberLabel,
@@ -127,6 +128,74 @@ export async function printKitchenTicket({ printer, widthMm, restaurantName, ord
     data: ticketHtml(order, restaurantName, mm)
   };
   await qz.print(config, [ticket]);
+  await cutAfterTicket(config);
+}
+
+function billItemRows(orders) {
+  const rows = new Map();
+  const sequence = [];
+  for (const order of orders || []) {
+    const items = Array.isArray(order?.items) ? order.items : [];
+    for (const item of items) {
+      const name = typeof item === "string" ? item.trim() : String(item?.name || item?.title || "").trim();
+      if (!name) continue;
+      const price = item && typeof item === "object" ? Number(item.price) : NaN;
+      if (!rows.has(name)) {
+        rows.set(name, { name, count: 0, total: 0 });
+        sequence.push(name);
+      }
+      const row = rows.get(name);
+      row.count += 1;
+      if (Number.isFinite(price)) row.total += price;
+    }
+  }
+  return sequence.map((name) => rows.get(name));
+}
+
+function billHtml(orders, restaurantName, widthMm, tableNumber) {
+  const rows = billItemRows(orders);
+  const total = rows.reduce((sum, row) => sum + row.total, 0);
+  const notes = (orders || [])
+    .map((order) => orderObservacionText(order))
+    .filter(Boolean);
+  const mozos = [
+    ...new Set((orders || []).map((order) => waiterNameFromMozoNotes(order?.notes)).filter(Boolean))
+  ];
+  const when = new Date().toLocaleString("es-AR");
+  const mesa = tableNumber || tableNumberLabel(orders?.[0]);
+  const items = rows.length
+    ? rows
+        .map((row) => {
+          const qty = row.count > 1 ? `${row.count} x ` : "1 x ";
+          const price = row.total > 0 ? `  ${currency(row.total)}` : "";
+          return `<div class="item">${escapeHtml(`${qty}${row.name}${price}`)}</div>`;
+        })
+        .join("")
+    : `<div class="item">(sin items)</div>`;
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    html, body { margin: 0; padding: 0; width: ${Number(widthMm) <= 58 ? 48 : 72}mm; }
+    body { font-family: Arial, sans-serif; color: #000; }
+    h1 { font-size: 18px; text-align: center; margin: 0 0 4px; }
+    .meta { text-align: center; font-size: 11px; margin: 0; }
+    .rule { border-top: 1px dashed #000; margin: 6px 0; }
+    .item { font-size: 14px; font-weight: 700; margin: 3px 0; }
+    .obs { font-size: 13px; font-weight: 700; margin-top: 4px; }
+    .total { font-size: 16px; font-weight: 900; text-align: center; margin-top: 4px; }
+  </style></head><body>
+    <h1>${escapeHtml(mesa ? `CUENTA MESA ${mesa}` : "CUENTA")}</h1>
+    <p class="meta">${escapeHtml(restaurantName || "")}</p>
+    <p class="meta">${escapeHtml(when)}</p>
+    <div class="rule"></div>
+    ${items}
+    <div class="rule"></div>
+    ${notes.map((note) => `<div class="obs">OBS: ${escapeHtml(note)}</div>`).join("")}
+    <p class="total">TOTAL ${escapeHtml(currency(total))}</p>
+    ${mozos.length ? `<p class="meta">Mozo: ${escapeHtml(mozos.join(", "))}</p>` : ""}
+    <p class="meta">Gracias</p>
+  </body></html>`;
+}
+
+async function cutAfterTicket(config) {
   try {
     await qz.print(config, [
       {
@@ -139,4 +208,34 @@ export async function printKitchenTicket({ printer, widthMm, restaurantName, ord
   } catch {
     // El ticket ya salió. Si el driver ignora el corte, no se vuelve a imprimir.
   }
+}
+
+export async function printCustomerBill({ printer, widthMm, restaurantName, orders, tableNumber }) {
+  const name = String(printer || "").trim();
+  if (!name) {
+    const error = new Error("Elegí la impresora de cuentas.");
+    error.code = "no_printer";
+    throw error;
+  }
+  await connectKitchenPrinter();
+  const mm = Number(widthMm) <= 58 ? 58 : 80;
+  const rows = billItemRows(orders);
+  const height = Math.min(280, 80 + rows.length * 10);
+  const config = qz.configs.create(name, {
+    units: "mm",
+    size: { width: mm, height },
+    margins: 0,
+    colorType: "blackwhite",
+    scaleContent: true,
+    interpolation: "nearest-neighbor"
+  });
+  await qz.print(config, [
+    {
+      type: "pixel",
+      format: "html",
+      flavor: "plain",
+      data: billHtml(orders, restaurantName, mm, tableNumber)
+    }
+  ]);
+  await cutAfterTicket(config);
 }
