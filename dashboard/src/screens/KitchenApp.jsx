@@ -38,6 +38,13 @@ function rememberPrintedId(restaurantId, orderId, field = "printed") {
   localStorage.setItem(printerStorageKey(restaurantId, field), JSON.stringify(ids));
 }
 
+function matchListedPrinter(saved, printers) {
+  const wanted = String(saved || "").trim().toLowerCase();
+  if (!wanted) return "";
+  const hit = printers.find((printer) => printer.name.trim().toLowerCase() === wanted);
+  return hit?.name || "";
+}
+
 export default function KitchenApp({ onLogout }) {
   const [restaurantId, setRestaurantId] = useState("");
   const [restaurantName, setRestaurantName] = useState("");
@@ -95,12 +102,26 @@ export default function KitchenApp({ onLogout }) {
         if (cancelled) return;
         setPrinters(found);
         setPrinterName((current) => {
-          const next = current && found.includes(current) ? current : found[0] || "";
-          printerNameRef.current = next;
-          if (restaurantId && next) {
-            localStorage.setItem(printerStorageKey(restaurantId, "printer"), next);
+          const saved = current || printerNameRef.current;
+          const matched = matchListedPrinter(saved, found);
+          const next = matched || (!saved ? found[0]?.name || "" : current);
+          if (next) {
+            printerNameRef.current = next;
+            if (restaurantId) {
+              localStorage.setItem(printerStorageKey(restaurantId, "printer"), next);
+            }
           }
           return next;
+        });
+        setBillPrinterName((current) => {
+          const saved = current || billPrinterRef.current;
+          const matched = matchListedPrinter(saved, found);
+          if (!matched) return current;
+          billPrinterRef.current = matched;
+          if (restaurantId) {
+            localStorage.setItem(printerStorageKey(restaurantId, "bill-printer"), matched);
+          }
+          return matched;
         });
         setPrinterStatus(found.length ? "QZ Tray conectado" : "QZ Tray conectado, sin impresoras");
       } catch (connectError) {
@@ -200,14 +221,14 @@ export default function KitchenApp({ onLogout }) {
     printedIdsRef.current.add(order.id);
     setPrintingId(order.id);
     try {
-      await printKitchenTicket({
+      const used = await printKitchenTicket({
         printer: printerNameRef.current,
         widthMm: paperWidthRef.current,
         restaurantName: restaurantNameRef.current,
         order
       });
       if (restaurantId) rememberPrintedId(restaurantId, order.id);
-      setPrinterStatus("Ticket enviado a la comanda");
+      setPrinterStatus(`Comanda enviada a ${used}`);
     } catch (printError) {
       printedIdsRef.current.delete(order.id);
       setError(`No se pudo imprimir: ${printError?.message || printError}`);
@@ -222,6 +243,15 @@ export default function KitchenApp({ onLogout }) {
     ),
     [orders]
   );
+  const samePortWarning = useMemo(() => {
+    if (!printerName || !billPrinterName || printerName === billPrinterName) return "";
+    const comanda = printers.find((printer) => printer.name === printerName);
+    const cuenta = printers.find((printer) => printer.name === billPrinterName);
+    const portA = comanda?.connection || "";
+    const portB = cuenta?.connection || "";
+    if (!portA || portA !== portB) return "";
+    return `Comanda y cuentas están las dos en el puerto ${portA}. Windows manda los dos tickets a la misma máquina. Conectá la segunda impresora en otro USB para que quede en otro puerto y volvé a elegirla.`;
+  }, [billPrinterName, printerName, printers]);
   ordersRef.current = orders;
 
   useEffect(() => {
@@ -255,7 +285,7 @@ export default function KitchenApp({ onLogout }) {
       }
       billPrintedRef.current.add(job.id);
       try {
-        await printCustomerBill({
+        const used = await printCustomerBill({
           printer: billPrinterRef.current,
           widthMm: paperWidthRef.current,
           restaurantName: restaurantNameRef.current,
@@ -263,7 +293,7 @@ export default function KitchenApp({ onLogout }) {
           tableNumber: job.tableNumber
         });
         rememberPrintedId(restaurantId, job.id, "bills");
-        setPrinterStatus("Cuenta enviada a la impresora");
+        setPrinterStatus(`Cuenta enviada a ${used}`);
       } catch (printError) {
         billPrintedRef.current.delete(job.id);
         setError(`No se pudo imprimir la cuenta: ${printError?.message || printError}`);
@@ -334,9 +364,9 @@ export default function KitchenApp({ onLogout }) {
                 className="ml-2 h-9 rounded-lg border border-slate-600 bg-slate-950 px-2 text-sm text-slate-100"
               >
                 <option value="">Elegir</option>
-                {printers.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
+                {printers.map((printer) => (
+                  <option key={printer.name} value={printer.name}>
+                    {printer.connection ? `${printer.name} · ${printer.connection}` : printer.name}
                   </option>
                 ))}
               </select>
@@ -356,9 +386,9 @@ export default function KitchenApp({ onLogout }) {
                 className="ml-2 h-9 rounded-lg border border-slate-600 bg-slate-950 px-2 text-sm text-slate-100"
               >
                 <option value="">Elegir</option>
-                {printers.map((name) => (
-                  <option key={`bill-${name}`} value={name}>
-                    {name}
+                {printers.map((printer) => (
+                  <option key={`bill-${printer.name}`} value={printer.name}>
+                    {printer.connection ? `${printer.name} · ${printer.connection}` : printer.name}
                   </option>
                 ))}
               </select>
@@ -394,7 +424,35 @@ export default function KitchenApp({ onLogout }) {
               }}
               className="rounded-lg border border-emerald-500/40 px-3 py-1.5 text-sm text-emerald-200 hover:bg-emerald-500/10"
             >
-              Probar
+              Probar comanda
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!billPrinterRef.current) {
+                  setPrinterStatus("Elegí la impresora de cuentas");
+                  return;
+                }
+                void printCustomerBill({
+                  printer: billPrinterRef.current,
+                  widthMm: paperWidthRef.current,
+                  restaurantName: restaurantNameRef.current,
+                  orders: [
+                    {
+                      items: [{ name: "Prueba de cuenta", price: 100 }],
+                      notes: "Mesa: 1"
+                    }
+                  ],
+                  tableNumber: "1"
+                })
+                  .then((used) => setPrinterStatus(`Cuenta de prueba enviada a ${used}`))
+                  .catch((printError) => {
+                    setError(`No se pudo imprimir la cuenta: ${printError?.message || printError}`);
+                  });
+              }}
+              className="rounded-lg border border-sky-500/40 px-3 py-1.5 text-sm text-sky-200 hover:bg-sky-500/10"
+            >
+              Probar cuenta
             </button>
             <button
               type="button"
@@ -408,6 +466,11 @@ export default function KitchenApp({ onLogout }) {
       </header>
 
       <main className="mx-auto max-w-4xl px-4 py-6">
+        {samePortWarning ? (
+          <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+            {samePortWarning}
+          </div>
+        ) : null}
         {error ? (
           <div className="mb-4 rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
             {error}
