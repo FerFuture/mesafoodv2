@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 import {
   ORDER_STATUS_COLORS,
@@ -11,6 +12,7 @@ import {
   fulfillmentIsPickup,
   adminDashboardNotesBlock,
   isDeliveryOrder,
+  isEncargoOrder,
   isWaiterDeliveryOrder,
   normalizeOrderStatus,
   notesIndicateDelivery,
@@ -362,6 +364,7 @@ function localDateKeyEndIso(dateKey) {
 }
 
 export default function AdminApp({ onLogout }) {
+  const navigate = useNavigate();
   const session = getSession();
   const isMaestro = session?.role === "maestro";
   const isEncargado = session?.role === "encargado";
@@ -2089,6 +2092,13 @@ export default function AdminApp({ onLogout }) {
             <div className="hidden rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-300 sm:block">
               Realtime activo
             </div>
+            <button
+              type="button"
+              onClick={() => navigate("/waiter")}
+              className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-500/20"
+            >
+              Tomar encargo
+            </button>
             {onLogout ? (
               <button
                 type="button"
@@ -2438,7 +2448,9 @@ export default function AdminApp({ onLogout }) {
                     </p>
                     <p>
                       <span className="text-slate-500">Modalidad:</span>{" "}
-                      {isWaiterDeliveryOrder(order)
+                      {isEncargoOrder(order)
+                        ? "Encargo"
+                        : isWaiterDeliveryOrder(order)
                         ? "Delivery mozo"
                         : fulfillmentIsDelivery(order)
                         ? "Delivery"
@@ -2496,7 +2508,7 @@ export default function AdminApp({ onLogout }) {
                     )}
                     {order.scheduled_delivery_at ? (
                       <p>
-                        <span className="text-slate-500">Horario delivery:</span>{" "}
+                        <span className="text-slate-500">{isEncargoOrder(order) ? "Para:" : "Horario delivery:"}</span>{" "}
                         {formatPaidAt(order.scheduled_delivery_at) || "-"}
                       </p>
                     ) : null}
@@ -3744,13 +3756,15 @@ function OrdersFilterBar({ filters, todayOnly, onApply, onReset, total, shown, d
         { value: "delivery", label: "Delivery" },
         { value: "delivery_mozo", label: "Delivery mozo" },
         { value: "local", label: "Retiro en local" },
-        { value: "mesa", label: "Pedido en mesa" }
+        { value: "mesa", label: "Pedido en mesa" },
+        { value: "encargo", label: "Encargo" }
       ]
     : [
         { value: "all", label: "Todas" },
         { value: "delivery_mozo", label: "Delivery mozo" },
         { value: "local", label: "Retiro en local" },
-        { value: "mesa", label: "Pedido en mesa" }
+        { value: "mesa", label: "Pedido en mesa" },
+        { value: "encargo", label: "Encargo" }
       ];
 
   const appliedSummaryParts = [];

@@ -145,7 +145,7 @@ function AppRoutes() {
         element={
           !session ? (
             <Navigate to="/login" replace />
-          ) : session.role !== "waiter" ? (
+          ) : session.role !== "waiter" && session.role !== "encargado" && session.role !== "admin" && session.role !== "maestro" ? (
             <Navigate to={homePathForRole(session.role)} replace />
           ) : (
             <WaiterApp onLogout={handleLogout} />

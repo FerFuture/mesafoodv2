@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 import { getSession } from "../lib/auth";
 import { fetchRestaurantForDashboard } from "../lib/restaurantTenant";
@@ -67,6 +68,7 @@ function orderFromWaiterPanel(order) {
   const notes = String(order?.notes || "").trim();
   if (/^Mozo\s*·\s*Mesa:/i.test(notes)) return true;
   if (/^Mozo\s*·\s*Delivery\b/i.test(notes)) return true;
+  if (/^Mozo\s*·\s*Encargo\b/i.test(notes)) return true;
   if (/Origen:\s*mozo\b/i.test(notes)) return true;
   return false;
 }
@@ -96,7 +98,17 @@ function cartTotal(cartById, menuById) {
   return Math.round(t * 100) / 100;
 }
 
+const ENCARGO_PRESETS = [
+  { id: "10", label: "En 10 min", minutes: 10 },
+  { id: "20", label: "En 20 min", minutes: 20 },
+  { id: "30", label: "En 30 min", minutes: 30 },
+  { id: "60", label: "En 1 hora", minutes: 60 },
+  { id: "hora", label: "A una hora", minutes: 0 }
+];
+
 export default function WaiterApp({ onLogout }) {
+  const navigate = useNavigate();
+  const canReturnToAdmin = ["admin", "encargado", "maestro"].includes(getSession()?.role);
   const [restaurantId, setRestaurantId] = useState("");
   const [restaurantName, setRestaurantName] = useState("");
   const [botNumber, setBotNumber] = useState("");
@@ -112,6 +124,8 @@ export default function WaiterApp({ onLogout }) {
   const [deliveryWarning, setDeliveryWarning] = useState("");
   const [scheduledDeliveryDate, setScheduledDeliveryDate] = useState(() => localDateInputValue());
   const [scheduledDeliveryTime, setScheduledDeliveryTime] = useState("");
+  const [encargoName, setEncargoName] = useState("");
+  const [encargoPreset, setEncargoPreset] = useState("10");
   const [observacion, setObservacion] = useState("");
   const tableInputRef = useRef(null);
   const addressInputRef = useRef(null);
@@ -187,7 +201,7 @@ export default function WaiterApp({ onLogout }) {
 
   useEffect(() => {
     if (waiterFulfillmentSelectorEnabled) return;
-    setFulfillmentType("mesa");
+    setFulfillmentType((current) => (current === "delivery" ? "mesa" : current));
     setDeliveryWarning("");
   }, [waiterFulfillmentSelectorEnabled]);
 
@@ -370,15 +384,21 @@ export default function WaiterApp({ onLogout }) {
     });
   }
 
-  async function performSubmitOrder(tableNum, deliveryDetails = null) {
+  async function performSubmitOrder(tableNum, deliveryDetails = null, encargoDetails = null) {
     const session = getSession();
     const waiterName = session?.username ? String(session.username).trim() : "";
     const userPart = waiterName ? ` · Mozo: ${waiterName}` : "";
     const deliveryAddressTrimmed = String(deliveryDetails?.address || "").trim();
-    const scheduledAt = deliveryDetails?.scheduledAt || null;
-    const notes = deliveryDetails
-      ? `Mozo · Delivery${userPart}`
-      : `Mozo · Mesa: ${tableNum}${userPart}`;
+    const scheduledAt = encargoDetails?.scheduledAt || deliveryDetails?.scheduledAt || null;
+    const encargoCustomer = String(encargoDetails?.name || "")
+      .replace(/[·|]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const notes = encargoDetails
+      ? `Mozo · Encargo${encargoCustomer ? `: ${encargoCustomer}` : ""}${userPart}`
+      : deliveryDetails
+        ? `Mozo · Delivery${userPart}`
+        : `Mozo · Mesa: ${tableNum}${userPart}`;
 
     const row = {
       restaurant_id: restaurantId,
@@ -387,16 +407,18 @@ export default function WaiterApp({ onLogout }) {
       items: cartLines,
       notes,
       status: "confirmed",
-      payment_method: deliveryDetails ? "efectivo" : "efectivo_mesa",
+      payment_method: deliveryDetails || encargoDetails ? "efectivo" : "efectivo_mesa",
       payment_status: deliveryDetails ? "paid" : "pending",
       payment_paid_at: deliveryDetails ? new Date().toISOString() : null,
-      fulfillment_type: deliveryDetails ? "delivery_mozo" : "mesa",
+      fulfillment_type: encargoDetails ? "encargo" : deliveryDetails ? "delivery_mozo" : "mesa",
       total_price: totalAmount,
       total_amount: totalAmount,
       subtotal_amount: totalAmount,
       created_at: new Date().toISOString()
     };
-    if (deliveryDetails) {
+    if (encargoDetails) {
+      row.scheduled_delivery_at = scheduledAt;
+    } else if (deliveryDetails) {
       row.address = deliveryAddressTrimmed;
       row.scheduled_delivery_at = scheduledAt;
     } else {
@@ -438,8 +460,13 @@ export default function WaiterApp({ onLogout }) {
       setDeliveryAddress("");
       setScheduledDeliveryDate(localDateInputValue());
       setScheduledDeliveryTime("");
+      setEncargoName("");
+      setEncargoPreset("10");
       setObservacion("");
-      if (deliveryDetails) {
+      if (encargoDetails) {
+        setTab("history");
+        setToast("Encargo anotado. Cocina lo imprime cerca de la hora.");
+      } else if (deliveryDetails) {
         setTab("history");
         setToast("Listo · delivery enviado a cocina");
       } else {
@@ -464,16 +491,26 @@ export default function WaiterApp({ onLogout }) {
     setSubmitting(false);
   }
 
+  function encargoScheduledAt() {
+    if (encargoPreset === "hora") {
+      return scheduledDeliveryIso(localDateInputValue(), scheduledDeliveryTime);
+    }
+    const preset = ENCARGO_PRESETS.find((item) => item.id === encargoPreset);
+    const minutes = preset?.minutes || 10;
+    return new Date(Date.now() + minutes * 60 * 1000).toISOString();
+  }
+
   async function submitOrder() {
     setError("");
     setMesaWarning("");
     setDeliveryWarning("");
     const isDelivery = fulfillmentType === "delivery";
+    const isEncargo = fulfillmentType === "encargo";
     const table = String(tableNumber || "").trim();
     const tableNum = parseInt(table, 10);
     const mesaMissing = !table;
     const mesaInvalid = Boolean(table) && (!Number.isFinite(tableNum) || tableNum < 1);
-    if (!isDelivery && (mesaMissing || mesaInvalid)) {
+    if (!isDelivery && !isEncargo && (mesaMissing || mesaInvalid)) {
       const msg = mesaMissing
         ? "Te olvidaste de indicar la mesa. Ingresá el número antes de enviar a cocina."
         : "Ingresá un número de mesa válido (1 o más).";
@@ -495,6 +532,13 @@ export default function WaiterApp({ onLogout }) {
     }
     if (isDelivery && scheduledAt === "") {
       const msg = "Revisá la fecha y hora programada del delivery.";
+      setError(msg);
+      setDeliveryWarning(msg);
+      return;
+    }
+    const encargoAt = isEncargo ? encargoScheduledAt() : null;
+    if (isEncargo && (!encargoAt || new Date(encargoAt).getTime() <= Date.now() - 60 * 1000)) {
+      const msg = "Elegí en cuánto lo quiere, o una hora que todavía no pasó.";
       setError(msg);
       setDeliveryWarning(msg);
       return;
@@ -523,17 +567,33 @@ export default function WaiterApp({ onLogout }) {
     }
 
     const confirmed = await requestConfirm({
-      title: "Confirmar envío a cocina",
-      message: "Revisá el pedido. Si está bien, tocá enviar para mandarlo a cocina.",
-      confirmLabel: "Sí, enviar a cocina",
+      title: isEncargo ? "Confirmar encargo" : "Confirmar envío a cocina",
+      message: isEncargo
+        ? "Queda anotado sin mesa. Cocina imprime la comanda cerca de la hora."
+        : "Revisá el pedido. Si está bien, tocá enviar para mandarlo a cocina.",
+      confirmLabel: isEncargo ? "Anotar encargo" : "Sí, enviar a cocina",
       cancelLabel: "Volver a editar",
       tone: "info",
       body: (
         <div className="mt-3 space-y-3 border-t border-slate-700/80 pt-3 text-left">
           <p className="text-sm">
             <span className="text-slate-500">Modalidad</span>{" "}
-            <span className="font-semibold text-white">{isDelivery ? "Delivery" : `Mesa ${tableNum}`}</span>
+            <span className="font-semibold text-white">
+              {isEncargo ? "Encargo" : isDelivery ? "Delivery" : `Mesa ${tableNum}`}
+            </span>
           </p>
+          {isEncargo ? (
+            <div className="space-y-1 text-sm">
+              <p>
+                <span className="text-slate-500">Cliente</span>{" "}
+                <span className="font-semibold text-white">{String(encargoName || "").trim() || "Sin nombre"}</span>
+              </p>
+              <p>
+                <span className="text-slate-500">Para</span>{" "}
+                <span className="font-semibold text-white">{formatDateTime(encargoAt)}</span>
+              </p>
+            </div>
+          ) : null}
           {isDelivery ? (
             <div className="space-y-1 text-sm">
               <p>
@@ -579,8 +639,11 @@ export default function WaiterApp({ onLogout }) {
     if (!confirmed) return;
 
     await performSubmitOrder(
-      isDelivery ? null : tableNum,
-      isDelivery ? { address, scheduledAt } : null
+      isDelivery || isEncargo ? null : tableNum,
+      isDelivery ? { address, scheduledAt } : null,
+      isEncargo
+        ? { name: encargoName, scheduledAt: encargoAt }
+        : null
     );
   }
 
@@ -780,13 +843,24 @@ export default function WaiterApp({ onLogout }) {
             ) : null}
             <p className="text-xs text-slate-400">{restaurantName || "…"}</p>
           </div>
-          <button
-            type="button"
-            onClick={() => onLogout?.()}
-            className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
-          >
-            Salir
-          </button>
+          <div className="flex items-center gap-2">
+            {canReturnToAdmin ? (
+              <button
+                type="button"
+                onClick={() => navigate("/admin")}
+                className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+              >
+                Volver
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => onLogout?.()}
+              className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+            >
+              Salir
+            </button>
+          </div>
         </div>
         <div className="mx-auto flex max-w-3xl gap-1 border-t border-slate-800/80 px-2 pb-2">
           <button
@@ -844,12 +918,11 @@ export default function WaiterApp({ onLogout }) {
 
         {tab === "order" ? (
           <div className="space-y-5">
-            {waiterFulfillmentSelectorEnabled ? (
             <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-4">
               <p className="block text-xs font-medium uppercase tracking-wider text-slate-400">
                 Modalidad
               </p>
-              <div className="mt-2 grid grid-cols-2 gap-2">
+              <div className={`mt-2 grid gap-2 ${waiterFulfillmentSelectorEnabled ? "grid-cols-3" : "grid-cols-2"}`}>
                 <button
                   type="button"
                   onClick={() => {
@@ -866,6 +939,7 @@ export default function WaiterApp({ onLogout }) {
                 >
                   Mesa
                 </button>
+                {waiterFulfillmentSelectorEnabled ? (
                 <button
                   type="button"
                   onClick={() => {
@@ -882,9 +956,25 @@ export default function WaiterApp({ onLogout }) {
                 >
                   Delivery
                 </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFulfillmentType("encargo");
+                    setMesaWarning("");
+                    setDeliveryWarning("");
+                    setError("");
+                  }}
+                  className={`rounded-lg border px-3 py-2 text-sm font-semibold ${
+                    fulfillmentType === "encargo"
+                      ? "border-amber-500/50 bg-amber-500/20 text-amber-100"
+                      : "border-slate-600 bg-slate-950 text-slate-300 hover:bg-slate-800"
+                  }`}
+                >
+                  Encargo
+                </button>
               </div>
             </div>
-            ) : null}
 
             <div
               className={`rounded-xl border bg-slate-900/60 p-4 ${
@@ -893,7 +983,74 @@ export default function WaiterApp({ onLogout }) {
                   : "border-slate-700"
               }`}
             >
-              {fulfillmentType === "delivery" ? (
+              {fulfillmentType === "encargo" ? (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium uppercase tracking-wider text-slate-400">
+                      Nombre <span className="normal-case tracking-normal text-slate-500">(opcional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Juan"
+                      value={encargoName}
+                      maxLength={60}
+                      onChange={(e) => setEncargoName(e.target.value)}
+                      className="mt-2 h-12 w-full rounded-lg border border-slate-600 bg-slate-950 px-3 text-base font-semibold text-white outline-none focus:border-emerald-500/50"
+                    />
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wider text-slate-400">Para cuándo</p>
+                    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {ENCARGO_PRESETS.map((preset) => (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => {
+                            setEncargoPreset(preset.id);
+                            setDeliveryWarning("");
+                            setError("");
+                          }}
+                          className={`rounded-lg border px-3 py-2 text-sm font-semibold ${
+                            encargoPreset === preset.id
+                              ? "border-amber-500/50 bg-amber-500/20 text-amber-100"
+                              : "border-slate-600 bg-slate-950 text-slate-300 hover:bg-slate-800"
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                    {encargoPreset === "hora" ? (
+                      <input
+                        type="text"
+                        value={scheduledDeliveryTime}
+                        inputMode="numeric"
+                        placeholder="HH:MM"
+                        autoComplete="off"
+                        maxLength={5}
+                        onChange={(e) => {
+                          setScheduledDeliveryTime(formatScheduledDeliveryTimeInput(e.target.value));
+                          setDeliveryWarning("");
+                          setError("");
+                        }}
+                        onBlur={(e) => {
+                          setScheduledDeliveryTime(normalizeScheduledDeliveryTimeInput(e.target.value));
+                        }}
+                        className="mt-3 h-12 w-full rounded-lg border border-slate-600 bg-slate-950 px-3 text-base font-semibold text-white outline-none focus:border-emerald-500/50"
+                      />
+                    ) : null}
+                  </div>
+                  {deliveryWarning ? (
+                    <p className="text-sm font-medium text-amber-200" role="alert">
+                      {deliveryWarning}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-slate-500">
+                      Sin mesa. Cocina recibe la comanda unos 20 minutos antes de esa hora.
+                    </p>
+                  )}
+                </div>
+              ) : fulfillmentType === "delivery" ? (
                 <div className="space-y-3">
                   <div>
                     <label className="block text-xs font-medium uppercase tracking-wider text-slate-400">
@@ -1297,6 +1454,7 @@ export default function WaiterApp({ onLogout }) {
                 const mesa = tableNumberLabel(order);
                 const rows = groupOrderItemRows(order);
                 const delivery = isWaiterDeliveryOrder(order);
+                const encargo = String(order.fulfillment_type || "").toLowerCase() === "encargo";
                 const scheduledLabel = formatDateTime(order.scheduled_delivery_at);
                 const orderStatus = normalizeOrderStatus(order);
                 const isClosed = orderStatus === "delivered" || orderStatus === "cancelled";
@@ -1312,7 +1470,17 @@ export default function WaiterApp({ onLogout }) {
                         <p className="font-mono text-xs text-slate-500">
                           #{String(order.id).slice(0, 8)} · {formatDateTime(order.created_at)}
                         </p>
-                        {delivery ? (
+                        {encargo ? (
+                          <div className="mt-2 space-y-1">
+                            <p className="text-xl font-bold text-amber-100">Encargo</p>
+                            <p className="text-sm text-slate-300">
+                              {String(order.notes || "").match(/Encargo:\s*([^·|]+)/)?.[1]?.trim() || "Sin nombre"}
+                            </p>
+                            {scheduledLabel ? (
+                              <p className="text-xs font-medium text-amber-200">Para: {scheduledLabel}</p>
+                            ) : null}
+                          </div>
+                        ) : delivery ? (
                           <div className="mt-2 space-y-1">
                             <p className="text-xl font-bold text-sky-100">Delivery mozo</p>
                             <p className="text-sm text-slate-300">{order.address || "Sin dirección"}</p>

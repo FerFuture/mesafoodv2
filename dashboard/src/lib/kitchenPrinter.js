@@ -1,7 +1,9 @@
 import qz from "qz-tray";
 import {
   currency,
+  encargoCustomerName,
   groupOrderItemRows,
+  isEncargoOrder,
   orderObservacionText,
   tableNumberLabel,
   waiterNameFromMozoNotes
@@ -191,20 +193,27 @@ export async function printKitchenTicket({ printer, widthMm, restaurantName, ord
   }
   const cols = paperCols(widthMm);
   const mesa = tableNumberLabel(order);
+  const encargo = isEncargoOrder(order);
   const rows = groupOrderItemRows(order);
   const observacion = orderObservacionText(order);
   const mozo = waiterNameFromMozoNotes(order?.notes);
-  const when = order?.created_at ? new Date(order.created_at).toLocaleString("es-AR") : "";
+  const cliente = encargo ? encargoCustomerName(order) : "";
+  const when = encargo && order?.scheduled_delivery_at
+    ? `Para ${new Date(order.scheduled_delivery_at).toLocaleString("es-AR")}`
+    : order?.created_at
+      ? new Date(order.created_at).toLocaleString("es-AR")
+      : "";
   const items = rows.length
     ? rows.map((row) => `${row.count > 1 ? row.count : 1} x ${row.name}`)
     : ["(sin items)"];
   const footer = [
+    cliente ? `Cliente: ${cliente}` : "",
     observacion ? `OBS: ${observacion}` : "",
     mozo ? `Mozo: ${mozo}` : ""
   ].filter(Boolean);
   const hex = escPosTicket(
     {
-      title: mesa ? `MESA ${mesa}` : "PEDIDO",
+      title: encargo ? "ENCARGO" : mesa ? `MESA ${mesa}` : "PEDIDO",
       center: [restaurantName || "Cocina", when].filter(Boolean),
       items,
       footer

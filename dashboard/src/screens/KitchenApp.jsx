@@ -2,9 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabaseClient";
 import { fetchRestaurantForDashboard } from "../lib/restaurantTenant";
 import {
+  ENCARGO_KITCHEN_LEAD_MS,
+  encargoCustomerName,
+  encargoDueAt,
+  encargoVisibleInKitchen,
   formatDateTime,
   groupOrderItemRows,
   isDeliveryOrder,
+  isEncargoOrder,
   isWaiterDeliveryOrder,
   kitchenMetaBoxContent,
   normalizeOrderStatus,
@@ -57,6 +62,7 @@ export default function KitchenApp({ onLogout }) {
   const [paperWidth, setPaperWidth] = useState("80");
   const [printerStatus, setPrinterStatus] = useState("Conectando con QZ Tray…");
   const [printingId, setPrintingId] = useState("");
+  const [now, setNow] = useState(() => Date.now());
   const printedIdsRef = useRef(new Set());
   const listeningRef = useRef(false);
   const printerNameRef = useRef("");
@@ -144,20 +150,31 @@ export default function KitchenApp({ onLogout }) {
     async function loadOrders() {
       setLoading(true);
       const sinceIso = new Date(Date.now() - HISTORY_HOURS * 60 * 60 * 1000).toISOString();
-      const { data, error: queryError } = await supabase
+      const recentQuery = supabase
         .from("orders")
         .select("*")
         .eq("restaurant_id", restaurantId)
         .gte("created_at", sinceIso)
         .order("created_at", { ascending: true })
         .limit(300);
+      const upcomingQuery = supabase
+        .from("orders")
+        .select("*")
+        .eq("restaurant_id", restaurantId)
+        .eq("fulfillment_type", "encargo")
+        .gte("scheduled_delivery_at", new Date().toISOString())
+        .limit(50);
+      const [{ data, error: queryError }, upcoming] = await Promise.all([recentQuery, upcomingQuery]);
       if (!active) return;
       if (queryError) {
         setError(`Error cargando pedidos: ${queryError.message}`);
         setLoading(false);
         return;
       }
-      setOrders(data || []);
+      const merged = new Map();
+      for (const row of data || []) merged.set(row.id, row);
+      for (const row of upcoming.data || []) merged.set(row.id, row);
+      setOrders([...merged.values()]);
       setLoading(false);
     }
 
@@ -237,11 +254,36 @@ export default function KitchenApp({ onLogout }) {
     }
   }
 
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  function kitchenSortTime(order) {
+    if (isEncargoOrder(order)) {
+      const due = encargoDueAt(order);
+      if (due != null) return due - ENCARGO_KITCHEN_LEAD_MS;
+    }
+    return new Date(order.created_at).getTime();
+  }
+
   const queue = useMemo(
-    () => orders.filter((o) => orderInKitchenQueue(o)).sort(
-      (a, b) => new Date(b.created_at) - new Date(a.created_at)
+    () => orders.filter((o) => orderInKitchenQueue(o, now)).sort(
+      (a, b) => kitchenSortTime(b) - kitchenSortTime(a)
     ),
-    [orders]
+    [orders, now]
+  );
+  const programados = useMemo(
+    () => orders
+      .filter((order) => {
+        if (!isEncargoOrder(order)) return false;
+        const status = normalizeOrderStatus(order);
+        if (status === "delivered" || status === "cancelled") return false;
+        if (status !== "confirmed") return false;
+        return !encargoVisibleInKitchen(order, now);
+      })
+      .sort((a, b) => (encargoDueAt(a) || 0) - (encargoDueAt(b) || 0)),
+    [orders, now]
   );
   const samePortWarning = useMemo(() => {
     if (!printerName || !billPrinterName || printerName === billPrinterName) return "";
@@ -327,7 +369,10 @@ export default function KitchenApp({ onLogout }) {
     const alreadyPrinted = readPrintedIds(restaurantId);
     for (const order of queue) {
       if (printedIdsRef.current.has(order.id) || alreadyPrinted.has(order.id)) continue;
-      const age = Date.now() - new Date(order.created_at).getTime();
+      const due = isEncargoOrder(order) ? encargoDueAt(order) : null;
+      const age = due != null
+        ? Date.now() - (due - ENCARGO_KITCHEN_LEAD_MS)
+        : Date.now() - new Date(order.created_at).getTime();
       const recent = Number.isFinite(age) && age >= -5000 && age < RECENT_TICKET_MS;
       if (!listeningRef.current && !recent) {
         rememberPrintedId(restaurantId, order.id);
@@ -477,6 +522,29 @@ export default function KitchenApp({ onLogout }) {
           </div>
         ) : null}
 
+        {programados.length > 0 ? (
+          <section className="mb-6">
+            <h2 className="mb-2 text-sm font-semibold text-amber-200">Programados</h2>
+            <ul className="space-y-2">
+              {programados.map((order) => {
+                const name = encargoCustomerName(order);
+                const rows = groupOrderItemRows(order);
+                return (
+                  <li key={order.id} className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3">
+                    <p className="text-sm font-semibold text-amber-100">
+                      Encargo{name ? ` · ${name}` : ""} · {formatDateTime(order.scheduled_delivery_at)}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-300">
+                      {rows.map((row) => `${row.count} x ${row.name}`).join(" · ")}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">La comanda se imprime cerca de esa hora.</p>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ) : null}
+
         {loading ? (
           <p className="text-slate-400">Cargando pedidos…</p>
         ) : queue.length === 0 ? (
@@ -491,6 +559,8 @@ export default function KitchenApp({ onLogout }) {
               const st = normalizeOrderStatus(order);
               const fromCustomer = !orderPlacedByWaiter(order);
               const waiterDelivery = isWaiterDeliveryOrder(order);
+              const encargo = isEncargoOrder(order);
+              const encargoName = encargoCustomerName(order);
               const kitchenMeta = kitchenMetaBoxContent(order);
               const observacion = orderObservacionText(order);
               return (
@@ -510,6 +580,11 @@ export default function KitchenApp({ onLogout }) {
                           ) : (
                             <span className="font-medium text-violet-300">Retiro en local</span>
                           )
+                        ) : encargo ? (
+                          <span className="font-semibold text-amber-200">
+                            Encargo{encargoName ? ` · ${encargoName}` : ""}
+                            {order.scheduled_delivery_at ? ` · ${formatDateTime(order.scheduled_delivery_at)}` : ""}
+                          </span>
                         ) : (
                           <>
                             {waiterDelivery ? (

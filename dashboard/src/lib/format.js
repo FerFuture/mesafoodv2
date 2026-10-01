@@ -50,14 +50,44 @@ export function orderFromWaiterPanelNotes(order) {
   if (/Origen:\s*mozo\b/i.test(notes)) return true;
   if (/^Mozo\s*·\s*Mesa:/i.test(notes.trim())) return true;
   if (/^Mozo\s*·\s*Delivery\b/i.test(notes.trim())) return true;
+  if (/^Mozo\s*·\s*Encargo\b/i.test(notes.trim())) return true;
   return false;
+}
+
+/** Encargo de mostrador: sin mesa, para una hora. */
+export function isEncargoOrder(order) {
+  return String(order?.fulfillment_type ?? "").trim().toLowerCase() === "encargo";
+}
+
+/** Nombre que anotó el mozo en un encargo (`Encargo: Juan`). */
+export function encargoCustomerName(order) {
+  const match = String(order?.notes || "").match(/Encargo:\s*([^·|]+)/i);
+  return match ? match[1].trim() : "";
+}
+
+/** La comanda del encargo entra a cocina este tiempo antes de la hora pedida. */
+export const ENCARGO_KITCHEN_LEAD_MS = 20 * 60 * 1000;
+
+export function encargoDueAt(order) {
+  const raw = order?.scheduled_delivery_at;
+  if (!raw) return null;
+  const time = new Date(raw).getTime();
+  return Number.isFinite(time) ? time : null;
+}
+
+/** Un encargo futuro no se cocina ni se imprime hasta acercarse la hora. */
+export function encargoVisibleInKitchen(order, now = Date.now()) {
+  if (!isEncargoOrder(order)) return true;
+  const due = encargoDueAt(order);
+  if (due == null) return true;
+  return now >= due - ENCARGO_KITCHEN_LEAD_MS;
 }
 
 /** Pedido de salón (carta QR o mozo en mesa), no delivery ni retiro. */
 export function orderIsTableService(order) {
   if (isWaiterDeliveryOrder(order) || fulfillmentIsDelivery(order)) return false;
   const ft = String(order?.fulfillment_type ?? "").trim().toLowerCase();
-  if (ft === "delivery" || ft === "delivery_mozo" || ft === "local") return false;
+  if (ft === "delivery" || ft === "delivery_mozo" || ft === "local" || ft === "encargo") return false;
   if (ft === "mesa") return true;
   return /^Mozo\s*·\s*Mesa:/i.test(String(order?.notes || "").trim());
 }
@@ -406,10 +436,11 @@ export function buildOrderAccounts(orders) {
 }
 
 /** Pedido que cocina debe elaborar: confirmado y aún abierto. No hace falta marcar “listo” en el panel. */
-export function orderInKitchenQueue(order) {
+export function orderInKitchenQueue(order, now = Date.now()) {
   const st = normalizeOrderStatus(order);
   if (st === "delivered" || st === "cancelled") return false;
   if (st !== "confirmed") return false;
+  if (!encargoVisibleInKitchen(order, now)) return false;
   return true;
 }
 
@@ -462,6 +493,19 @@ export function kitchenPaymentMethodLabelEs(order) {
  * Mozo: notas operativas (sin prefijo "Origen"). Cliente delivery: dirección + pago. Cliente local: teléfono + retiro.
  */
 export function kitchenMetaBoxContent(order) {
+  if (isEncargoOrder(order)) {
+    const name = encargoCustomerName(order);
+    const scheduled = formatDateTime(order?.scheduled_delivery_at);
+    const mozo = waiterNameFromMozoNotes(order?.notes);
+    return [
+      "Encargo",
+      name ? `Cliente: ${name}` : "",
+      scheduled ? `Para: ${scheduled}` : "",
+      mozo ? `Mozo: ${mozo}` : ""
+    ]
+      .filter(Boolean)
+      .join(" | ");
+  }
   if (orderPlacedByWaiter(order) && isWaiterDeliveryOrder(order)) {
     const addr = String(order?.address ?? "").trim();
     const scheduled = formatDateTime(order?.scheduled_delivery_at);
