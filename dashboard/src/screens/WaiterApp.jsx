@@ -6,6 +6,7 @@ import { fetchRestaurantForDashboard } from "../lib/restaurantTenant";
 import { liveMesaTables, requestBillPrint, setMesaQrLive } from "../lib/mesaQrLive";
 import {
   currency,
+  encargoDueAt,
   formatDateTime,
   formatOrderStatusLabelEs,
   formatPaymentStatusLabelEs,
@@ -103,7 +104,7 @@ const ENCARGO_PRESETS = [
   { id: "20", label: "En 20 min", minutes: 20 },
   { id: "30", label: "En 30 min", minutes: 30 },
   { id: "60", label: "En 1 hora", minutes: 60 },
-  { id: "hora", label: "A una hora", minutes: 0 }
+  { id: "hora", label: "Elegir hora", minutes: 0 }
 ];
 
 export default function WaiterApp({ onLogout }) {
@@ -394,8 +395,9 @@ export default function WaiterApp({ onLogout }) {
       .replace(/[·|]/g, " ")
       .replace(/\s+/g, " ")
       .trim();
+    const paraPart = encargoDetails && scheduledAt ? ` · Para: ${scheduledAt}` : "";
     const notes = encargoDetails
-      ? `Mozo · Encargo${encargoCustomer ? `: ${encargoCustomer}` : ""}${userPart}`
+      ? `Mozo · Encargo${encargoCustomer ? `: ${encargoCustomer}` : ""}${paraPart}${userPart}`
       : deliveryDetails
         ? `Mozo · Delivery${userPart}`
         : `Mozo · Mesa: ${tableNum}${userPart}`;
@@ -416,12 +418,10 @@ export default function WaiterApp({ onLogout }) {
       subtotal_amount: totalAmount,
       created_at: new Date().toISOString()
     };
-    if (encargoDetails) {
-      row.scheduled_delivery_at = scheduledAt;
-    } else if (deliveryDetails) {
+    if (deliveryDetails) {
       row.address = deliveryAddressTrimmed;
       row.scheduled_delivery_at = scheduledAt;
-    } else {
+    } else if (!encargoDetails) {
       row.table_number = tableNum;
     }
     const observacionTrimmed = String(observacion || "").trim();
@@ -1455,7 +1455,10 @@ export default function WaiterApp({ onLogout }) {
                 const rows = groupOrderItemRows(order);
                 const delivery = isWaiterDeliveryOrder(order);
                 const encargo = String(order.fulfillment_type || "").toLowerCase() === "encargo";
-                const scheduledLabel = formatDateTime(order.scheduled_delivery_at);
+                const scheduledLabel = formatDateTime(
+                  order.scheduled_delivery_at ||
+                    (encargoDueAt(order) ? new Date(encargoDueAt(order)).toISOString() : null)
+                );
                 const orderStatus = normalizeOrderStatus(order);
                 const isClosed = orderStatus === "delivered" || orderStatus === "cancelled";
                 const paid = paymentIsApproved(order);

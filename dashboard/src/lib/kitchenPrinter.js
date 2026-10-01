@@ -3,6 +3,7 @@ import {
   currency,
   encargoCustomerName,
   groupOrderItemRows,
+  encargoDueAt,
   isEncargoOrder,
   orderObservacionText,
   tableNumberLabel,
@@ -198,8 +199,9 @@ export async function printKitchenTicket({ printer, widthMm, restaurantName, ord
   const observacion = orderObservacionText(order);
   const mozo = waiterNameFromMozoNotes(order?.notes);
   const cliente = encargo ? encargoCustomerName(order) : "";
-  const when = encargo && order?.scheduled_delivery_at
-    ? `Para ${new Date(order.scheduled_delivery_at).toLocaleString("es-AR")}`
+  const due = encargo ? encargoDueAt(order) : null;
+  const when = due
+    ? `Para ${new Date(due).toLocaleString("es-AR")}`
     : order?.created_at
       ? new Date(order.created_at).toLocaleString("es-AR")
       : "";

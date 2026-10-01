@@ -13,6 +13,7 @@ import {
   adminDashboardNotesBlock,
   isDeliveryOrder,
   isEncargoOrder,
+  encargoDueAt,
   isWaiterDeliveryOrder,
   normalizeOrderStatus,
   notesIndicateDelivery,
@@ -2506,10 +2507,12 @@ export default function AdminApp({ onLogout }) {
                         </p>
                       </>
                     )}
-                    {order.scheduled_delivery_at ? (
+                    {encargoDueAt(order) || order.scheduled_delivery_at ? (
                       <p>
                         <span className="text-slate-500">{isEncargoOrder(order) ? "Para:" : "Horario delivery:"}</span>{" "}
-                        {formatPaidAt(order.scheduled_delivery_at) || "-"}
+                        {formatPaidAt(
+                          order.scheduled_delivery_at || new Date(encargoDueAt(order)).toISOString()
+                        ) || "-"}
                       </p>
                     ) : null}
                     {order.payment_link ? (

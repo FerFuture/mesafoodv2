@@ -157,24 +157,14 @@ export default function KitchenApp({ onLogout }) {
         .gte("created_at", sinceIso)
         .order("created_at", { ascending: true })
         .limit(300);
-      const upcomingQuery = supabase
-        .from("orders")
-        .select("*")
-        .eq("restaurant_id", restaurantId)
-        .eq("fulfillment_type", "encargo")
-        .gte("scheduled_delivery_at", new Date().toISOString())
-        .limit(50);
-      const [{ data, error: queryError }, upcoming] = await Promise.all([recentQuery, upcomingQuery]);
+      const { data, error: queryError } = await recentQuery;
       if (!active) return;
       if (queryError) {
         setError(`Error cargando pedidos: ${queryError.message}`);
         setLoading(false);
         return;
       }
-      const merged = new Map();
-      for (const row of data || []) merged.set(row.id, row);
-      for (const row of upcoming.data || []) merged.set(row.id, row);
-      setOrders([...merged.values()]);
+      setOrders(data || []);
       setLoading(false);
     }
 
@@ -280,6 +270,7 @@ export default function KitchenApp({ onLogout }) {
         const status = normalizeOrderStatus(order);
         if (status === "delivered" || status === "cancelled") return false;
         if (status !== "confirmed") return false;
+        if (encargoDueAt(order) == null) return false;
         return !encargoVisibleInKitchen(order, now);
       })
       .sort((a, b) => (encargoDueAt(a) || 0) - (encargoDueAt(b) || 0)),
@@ -532,7 +523,7 @@ export default function KitchenApp({ onLogout }) {
                 return (
                   <li key={order.id} className="rounded-xl border border-slate-700 bg-slate-900/60 px-4 py-3">
                     <p className="text-sm font-semibold text-amber-100">
-                      Encargo{name ? ` · ${name}` : ""} · {formatDateTime(order.scheduled_delivery_at)}
+                      Encargo{name ? ` · ${name}` : ""} · {formatDateTime(encargoDueAt(order) ? new Date(encargoDueAt(order)).toISOString() : order.scheduled_delivery_at)}
                     </p>
                     <p className="mt-1 text-sm text-slate-300">
                       {rows.map((row) => `${row.count} x ${row.name}`).join(" · ")}
@@ -583,7 +574,9 @@ export default function KitchenApp({ onLogout }) {
                         ) : encargo ? (
                           <span className="font-semibold text-amber-200">
                             Encargo{encargoName ? ` · ${encargoName}` : ""}
-                            {order.scheduled_delivery_at ? ` · ${formatDateTime(order.scheduled_delivery_at)}` : ""}
+                            {encargoDueAt(order) || order.scheduled_delivery_at
+                              ? ` · ${formatDateTime(encargoDueAt(order) ? new Date(encargoDueAt(order)).toISOString() : order.scheduled_delivery_at)}`
+                              : ""}
                           </span>
                         ) : (
                           <>

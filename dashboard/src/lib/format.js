@@ -70,8 +70,13 @@ export const ENCARGO_KITCHEN_LEAD_MS = 10 * 60 * 1000;
 
 export function encargoDueAt(order) {
   const raw = order?.scheduled_delivery_at;
-  if (!raw) return null;
-  const time = new Date(raw).getTime();
+  if (raw) {
+    const time = new Date(raw).getTime();
+    if (Number.isFinite(time)) return time;
+  }
+  const match = String(order?.notes || "").match(/Para:\s*([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-Z]+)/i);
+  if (!match) return null;
+  const time = new Date(match[1]).getTime();
   return Number.isFinite(time) ? time : null;
 }
 
@@ -79,7 +84,7 @@ export function encargoDueAt(order) {
 export function encargoVisibleInKitchen(order, now = Date.now()) {
   if (!isEncargoOrder(order)) return true;
   const due = encargoDueAt(order);
-  if (due == null) return true;
+  if (due == null) return false;
   return now >= due - ENCARGO_KITCHEN_LEAD_MS;
 }
 
@@ -495,7 +500,8 @@ export function kitchenPaymentMethodLabelEs(order) {
 export function kitchenMetaBoxContent(order) {
   if (isEncargoOrder(order)) {
     const name = encargoCustomerName(order);
-    const scheduled = formatDateTime(order?.scheduled_delivery_at);
+    const due = encargoDueAt(order);
+    const scheduled = due ? formatDateTime(new Date(due).toISOString()) : formatDateTime(order?.scheduled_delivery_at);
     const mozo = waiterNameFromMozoNotes(order?.notes);
     return [
       "Encargo",
