@@ -2095,7 +2095,7 @@ export default function AdminApp({ onLogout }) {
             <button
               type="button"
               onClick={() => navigate("/waiter")}
-              className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-500/20"
+              className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-500/20 lg:border-amber-400 lg:bg-amber-500 lg:px-6 lg:py-3 lg:text-lg lg:font-semibold lg:text-slate-950 lg:hover:bg-amber-400"
             >
               Tomar encargo
             </button>
@@ -2103,7 +2103,7 @@ export default function AdminApp({ onLogout }) {
               <button
                 type="button"
                 onClick={onLogout}
-                className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+                className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 lg:px-6 lg:py-3 lg:text-lg lg:font-semibold lg:text-slate-100"
               >
                 Salir
               </button>
