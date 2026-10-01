@@ -537,7 +537,7 @@ export default function KitchenApp({ onLogout }) {
                     <p className="mt-1 text-sm text-slate-300">
                       {rows.map((row) => `${row.count} x ${row.name}`).join(" · ")}
                     </p>
-                    <p className="mt-1 text-xs text-slate-500">La comanda se imprime cerca de esa hora.</p>
+                    <p className="mt-1 text-xs text-slate-500">La comanda se imprime 10 minutos antes.</p>
                   </li>
                 );
               })}

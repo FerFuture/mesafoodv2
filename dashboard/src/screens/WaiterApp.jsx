@@ -465,7 +465,7 @@ export default function WaiterApp({ onLogout }) {
       setObservacion("");
       if (encargoDetails) {
         setTab("history");
-        setToast("Encargo anotado. Cocina lo imprime cerca de la hora.");
+        setToast("Encargo anotado. Cocina lo imprime 10 minutos antes.");
       } else if (deliveryDetails) {
         setTab("history");
         setToast("Listo · delivery enviado a cocina");
@@ -569,7 +569,7 @@ export default function WaiterApp({ onLogout }) {
     const confirmed = await requestConfirm({
       title: isEncargo ? "Confirmar encargo" : "Confirmar envío a cocina",
       message: isEncargo
-        ? "Queda anotado sin mesa. Cocina imprime la comanda cerca de la hora."
+        ? "Queda anotado sin mesa. Cocina imprime la comanda 10 minutos antes."
         : "Revisá el pedido. Si está bien, tocá enviar para mandarlo a cocina.",
       confirmLabel: isEncargo ? "Anotar encargo" : "Sí, enviar a cocina",
       cancelLabel: "Volver a editar",
@@ -1046,7 +1046,7 @@ export default function WaiterApp({ onLogout }) {
                     </p>
                   ) : (
                     <p className="text-xs text-slate-500">
-                      Sin mesa. Cocina recibe la comanda unos 20 minutos antes de esa hora.
+                      Sin mesa. Cocina recibe la comanda unos 10 minutos antes de esa hora.
                     </p>
                   )}
                 </div>

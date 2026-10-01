@@ -66,7 +66,7 @@ export function encargoCustomerName(order) {
 }
 
 /** La comanda del encargo entra a cocina este tiempo antes de la hora pedida. */
-export const ENCARGO_KITCHEN_LEAD_MS = 20 * 60 * 1000;
+export const ENCARGO_KITCHEN_LEAD_MS = 10 * 60 * 1000;
 
 export function encargoDueAt(order) {
   const raw = order?.scheduled_delivery_at;
