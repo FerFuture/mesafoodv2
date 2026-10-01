@@ -835,20 +835,20 @@ export default function WaiterApp({ onLogout }) {
   return (
     <div className="dark min-h-screen bg-slate-950 text-slate-100">
       <header className="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/95 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-3 px-4 py-3 lg:max-w-6xl lg:px-8 lg:py-5">
           <div>
-            <h1 className="text-lg font-semibold text-white">Mozo</h1>
+            <h1 className="text-lg font-semibold text-white lg:text-3xl">Mozo</h1>
             {waiterIdentityLabel ? (
-              <p className="text-xs font-medium text-slate-200">{waiterIdentityLabel}</p>
+              <p className="text-xs font-medium text-slate-200 lg:text-base">{waiterIdentityLabel}</p>
             ) : null}
-            <p className="text-xs text-slate-400">{restaurantName || "…"}</p>
+            <p className="text-xs text-slate-400 lg:text-base">{restaurantName || "…"}</p>
           </div>
           <div className="flex items-center gap-2">
             {canReturnToAdmin ? (
               <button
                 type="button"
                 onClick={() => navigate("/admin")}
-                className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+                className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800 lg:px-5 lg:py-2.5 lg:text-base"
               >
                 Volver
               </button>
@@ -856,17 +856,17 @@ export default function WaiterApp({ onLogout }) {
             <button
               type="button"
               onClick={() => onLogout?.()}
-              className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+              className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800 lg:px-5 lg:py-2.5 lg:text-base"
             >
               Salir
             </button>
           </div>
         </div>
-        <div className="mx-auto flex max-w-3xl gap-1 border-t border-slate-800/80 px-2 pb-2">
+        <div className="mx-auto flex max-w-3xl gap-1 border-t border-slate-800/80 px-2 pb-2 lg:max-w-6xl lg:gap-2 lg:px-6 lg:pb-4">
           <button
             type="button"
             onClick={() => setTab("order")}
-            className={`flex-1 rounded-lg py-2 text-sm font-medium ${
+            className={`flex-1 rounded-lg py-2 text-sm font-medium lg:py-3 lg:text-lg ${
               tab === "order"
                 ? "bg-emerald-500/20 text-emerald-200"
                 : "text-slate-400 hover:bg-slate-800/60"
@@ -877,7 +877,7 @@ export default function WaiterApp({ onLogout }) {
           <button
             type="button"
             onClick={() => setTab("mesas")}
-            className={`flex-1 rounded-lg py-2 text-sm font-medium ${
+            className={`flex-1 rounded-lg py-2 text-sm font-medium lg:py-3 lg:text-lg ${
               tab === "mesas"
                 ? "bg-emerald-500/20 text-emerald-200"
                 : "text-slate-400 hover:bg-slate-800/60"
@@ -885,7 +885,7 @@ export default function WaiterApp({ onLogout }) {
           >
             Mesas
             {openOrdersByTable.size > 0 ? (
-              <span className="ml-1 rounded-full bg-amber-500/20 px-1.5 text-[11px] text-amber-200">
+              <span className="ml-1 rounded-full bg-amber-500/20 px-1.5 text-[11px] text-amber-200 lg:px-2 lg:text-sm">
                 {openOrdersByTable.size}
               </span>
             ) : null}
@@ -893,7 +893,7 @@ export default function WaiterApp({ onLogout }) {
           <button
             type="button"
             onClick={() => setTab("history")}
-            className={`relative flex-1 rounded-lg py-2 text-sm font-medium ${
+            className={`relative flex-1 rounded-lg py-2 text-sm font-medium lg:py-3 lg:text-lg ${
               tab === "history"
                 ? "bg-emerald-500/20 text-emerald-200"
                 : "text-slate-400 hover:bg-slate-800/60"
@@ -909,7 +909,7 @@ export default function WaiterApp({ onLogout }) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl px-4 py-5">
+      <main className="mx-auto max-w-3xl px-4 py-5 lg:max-w-6xl lg:px-8 lg:py-8">
         {error ? (
           <div className="mb-4 rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
             {error}
@@ -1211,7 +1211,7 @@ export default function WaiterApp({ onLogout }) {
             ) : (
               groupedMenu.map(([category, items]) => (
                 <section key={category}>
-                  <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500 lg:text-sm">
                     {category}
                   </h2>
                   <div className="space-y-2">
@@ -1223,8 +1223,8 @@ export default function WaiterApp({ onLogout }) {
                           className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-700/80 bg-slate-900/40 px-3 py-2"
                         >
                           <div className="min-w-0 flex-1">
-                            <p className="font-medium text-slate-100">{item.name}</p>
-                            <p className="text-sm text-emerald-300/90">{currency(item.price)}</p>
+                            <p className="font-medium text-slate-100 lg:text-lg">{item.name}</p>
+                            <p className="text-sm text-emerald-300/90 lg:text-base">{currency(item.price)}</p>
                           </div>
                           <div className="flex items-center gap-2">
                             <button
@@ -1255,15 +1255,15 @@ export default function WaiterApp({ onLogout }) {
             <div className="sticky bottom-0 border-t border-slate-800 bg-slate-950/95 py-4 backdrop-blur">
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-500/30 bg-emerald-950/20 px-4 py-3">
                 <div>
-                  <p className="text-xs text-slate-400">Total</p>
-                  <p className="text-xl font-bold text-emerald-200">{currency(totalAmount)}</p>
+                  <p className="text-xs text-slate-400 lg:text-sm">Total</p>
+                  <p className="text-xl font-bold text-emerald-200 lg:text-3xl">{currency(totalAmount)}</p>
                   <p className="text-[11px] text-slate-500">{cartLines.length} ítem(s)</p>
                 </div>
                 <button
                   type="button"
                   disabled={submitting || cartLines.length === 0}
                   onClick={() => submitOrder()}
-                  className="rounded-lg bg-emerald-500 px-6 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                  className="rounded-lg bg-emerald-500 px-6 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50 lg:px-8 lg:py-4 lg:text-lg"
                 >
                   {submitting
                     ? "Enviando…"
@@ -1276,10 +1276,10 @@ export default function WaiterApp({ onLogout }) {
           </div>
         ) : tab === "mesas" ? (
           <div className="space-y-4">
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-500 lg:text-base">
               Al tomar el pedido, el QR de esa mesa queda habilitado: si te ocupás, los clientes pueden mandar a cocina lo que se les antoje. Al cobrar, el QR se cierra.
             </p>
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-4 lg:gap-4">
               {mesaNumbers.map((n) => {
                 const list = openOrdersByTable.get(n) || [];
                 const occupied = list.length > 0;
@@ -1290,7 +1290,7 @@ export default function WaiterApp({ onLogout }) {
                     key={n}
                     type="button"
                     onClick={() => setSelectedMesa(selected ? null : n)}
-                    className={`rounded-xl border px-2 py-3 text-center ${
+                    className={`rounded-xl border px-2 py-3 text-center lg:rounded-2xl lg:px-4 lg:py-8 ${
                       occupied
                         ? selected
                           ? "border-amber-300 bg-amber-500/25 text-amber-50"
@@ -1300,16 +1300,16 @@ export default function WaiterApp({ onLogout }) {
                           : "border-slate-700 bg-slate-900/50 text-slate-200"
                     }`}
                   >
-                    <p className="text-lg font-semibold tabular-nums">{n}</p>
-                    <p className="text-[11px]">{occupied ? "Ocupada" : "Disponible"}</p>
-                    {qrOpen ? <p className="text-[10px] text-violet-200">QR abierto</p> : null}
+                    <p className="text-lg font-semibold tabular-nums lg:text-4xl">{n}</p>
+                    <p className="text-[11px] lg:mt-1 lg:text-base">{occupied ? "Ocupada" : "Disponible"}</p>
+                    {qrOpen ? <p className="text-[10px] text-violet-200 lg:text-sm">QR abierto</p> : null}
                   </button>
                 );
               })}
             </div>
             {selectedMesa == null ? null : (openOrdersByTable.get(selectedMesa) || []).length === 0 ? (
               <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/20 px-4 py-4">
-                <p className="text-sm text-emerald-100">Mesa {selectedMesa} disponible.</p>
+                <p className="text-sm text-emerald-100 lg:text-xl">Mesa {selectedMesa} disponible.</p>
                 <p className="mt-1 text-xs text-slate-400">
                   {liveTables.includes(selectedMesa)
                     ? "El QR está abierto: pueden pedir desde el celular."
@@ -1323,7 +1323,7 @@ export default function WaiterApp({ onLogout }) {
                       setTableNumber(String(selectedMesa));
                       setTab("order");
                     }}
-                    className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400"
+                    className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400 lg:px-6 lg:py-3 lg:text-base"
                   >
                     Tomar pedido
                   </button>
@@ -1331,7 +1331,7 @@ export default function WaiterApp({ onLogout }) {
                     type="button"
                     disabled={savingQrTable === selectedMesa}
                     onClick={() => toggleTableQr(selectedMesa, !liveTables.includes(selectedMesa))}
-                    className="rounded-lg border border-violet-400/50 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/10 disabled:opacity-50"
+                    className="rounded-lg border border-violet-400/50 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/10 disabled:opacity-50 lg:px-6 lg:py-3 lg:text-base"
                   >
                     {savingQrTable === selectedMesa
                       ? "Guardando…"
@@ -1352,7 +1352,7 @@ export default function WaiterApp({ onLogout }) {
                 return (
                   <article className="rounded-xl border border-amber-500/30 bg-slate-900/60 px-4 py-3">
                     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                      <p className="font-semibold text-slate-100">Cuenta · Mesa {selectedMesa}</p>
+                      <p className="font-semibold text-slate-100 lg:text-2xl">Cuenta · Mesa {selectedMesa}</p>
                       <p className="text-xs text-slate-500">
                         {liveTables.includes(selectedMesa) ? "QR abierto · " : "QR cerrado · "}
                         {list.length === 1 ? "1 envío a cocina" : `${list.length} envíos a cocina`}
@@ -1375,7 +1375,7 @@ export default function WaiterApp({ onLogout }) {
                       ))}
                     </div>
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 pt-3">
-                      <p className="text-lg font-bold text-emerald-200">{currency(total)}</p>
+                      <p className="text-lg font-bold text-emerald-200 lg:text-3xl">{currency(total)}</p>
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
@@ -1395,7 +1395,7 @@ export default function WaiterApp({ onLogout }) {
                                 : "Cuenta enviada a la impresora"
                             );
                           }}
-                          className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                          className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-slate-800 disabled:opacity-50 lg:px-6 lg:py-3 lg:text-base"
                         >
                           {billBusy ? "Enviando…" : "Imprimir cuenta"}
                         </button>
@@ -1403,7 +1403,7 @@ export default function WaiterApp({ onLogout }) {
                           type="button"
                           disabled={savingQrTable === selectedMesa}
                           onClick={() => toggleTableQr(selectedMesa, !liveTables.includes(selectedMesa))}
-                          className="rounded-lg border border-violet-400/50 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/10 disabled:opacity-50"
+                          className="rounded-lg border border-violet-400/50 px-4 py-2 text-sm font-semibold text-violet-100 hover:bg-violet-500/10 disabled:opacity-50 lg:px-6 lg:py-3 lg:text-base"
                         >
                           {savingQrTable === selectedMesa
                             ? "Guardando…"
@@ -1418,7 +1418,7 @@ export default function WaiterApp({ onLogout }) {
                             setTableNumber(String(selectedMesa));
                             setTab("order");
                           }}
-                          className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-slate-800"
+                          className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-slate-800 lg:px-6 lg:py-3 lg:text-base"
                         >
                           Agregar a la cuenta
                         </button>
@@ -1426,7 +1426,7 @@ export default function WaiterApp({ onLogout }) {
                           type="button"
                           disabled={savingThisAccount}
                           onClick={() => confirmOrderPayment(list[0])}
-                          className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                          className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50 lg:px-6 lg:py-3 lg:text-base"
                         >
                           {savingThisAccount ? "Guardando…" : "Pagado"}
                         </button>
