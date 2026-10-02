@@ -12,6 +12,22 @@ import {
 const TABLE = "dashboard_users";
 const USERNAME_RE = /^[a-z0-9._-]{3,40}$/;
 
+/** El admin más antiguo del local es el que se creó con el restaurante. No se edita ni se borra. */
+function localAdminId(list) {
+  let oldest = null;
+  for (const row of list || []) {
+    if (row.role !== "admin") continue;
+    if (!oldest) {
+      oldest = row;
+      continue;
+    }
+    const rowAt = String(row.created_at || "");
+    const oldestAt = String(oldest.created_at || "");
+    if (rowAt && (!oldestAt || rowAt < oldestAt)) oldest = row;
+  }
+  return oldest?.id || "";
+}
+
 /** Igual que `index.js` (`bcrypt.hashSync(..., 10)`): sin API intermedia. */
 function hashPasswordForStorage(password) {
   const pw = String(password || "");
@@ -161,6 +177,10 @@ export default function DashboardUsersPanel({ restaurantId = "" }) {
   }
 
   async function toggleActive(row) {
+    if (row.id === localAdminId(rows)) {
+      setError("La cuenta admin del local no se puede desactivar.");
+      return;
+    }
     setError("");
     setSavingId(row.id);
     const { error: upErr } = await supabase
@@ -180,6 +200,10 @@ export default function DashboardUsersPanel({ restaurantId = "" }) {
   }
 
   async function saveRowEdit(row, draft) {
+    if (row.id === localAdminId(rows)) {
+      setError("La cuenta admin del local no se puede modificar.");
+      return;
+    }
     setError("");
     const u = draft.username.trim().toLowerCase();
     if (!USERNAME_RE.test(u)) {
@@ -228,6 +252,10 @@ export default function DashboardUsersPanel({ restaurantId = "" }) {
   }
 
   async function removeRow(row) {
+    if (row.id === localAdminId(rows)) {
+      setError("La cuenta admin del local no se puede borrar.");
+      return;
+    }
     if (
       !window.confirm(
         `¿Eliminar definitivamente el usuario "${row.username}"? Esta acción no se puede deshacer.`
@@ -348,6 +376,7 @@ export default function DashboardUsersPanel({ restaurantId = "" }) {
               <UserRowCard
                 key={row.id}
                 row={row}
+                locked={row.id === localAdminId(rows)}
                 saving={savingId === row.id}
                 onSave={saveRowEdit}
                 onToggleActive={toggleActive}
@@ -361,7 +390,7 @@ export default function DashboardUsersPanel({ restaurantId = "" }) {
   );
 }
 
-function UserRowCard({ row, saving, onSave, onToggleActive, onDelete }) {
+function UserRowCard({ row, locked, saving, onSave, onToggleActive, onDelete }) {
   const [draft, setDraft] = useState({
     username: row.username,
     role: row.role,
@@ -384,12 +413,18 @@ function UserRowCard({ row, saving, onSave, onToggleActive, onDelete }) {
     <article className="rounded-xl border border-slate-700 bg-slate-900 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-2 text-sm">
+          {locked ? (
+            <p className="text-xs text-amber-200/90">
+              Cuenta admin del local. No se puede cambiar ni borrar.
+            </p>
+          ) : null}
           <label className="block space-y-1">
             <span className="text-xs text-slate-500">Usuario</span>
             <input
               value={draft.username}
               onChange={(e) => setDraft((d) => ({ ...d, username: e.target.value }))}
-              className="h-9 w-full max-w-xs rounded-lg border border-slate-700 bg-slate-950 px-2 text-sm text-slate-100"
+              disabled={locked}
+              className="h-9 w-full max-w-xs rounded-lg border border-slate-700 bg-slate-950 px-2 text-sm text-slate-100 disabled:text-slate-400"
             />
           </label>
           <label className="block space-y-1">
@@ -397,7 +432,8 @@ function UserRowCard({ row, saving, onSave, onToggleActive, onDelete }) {
             <select
               value={draft.role}
               onChange={(e) => setDraft((d) => ({ ...d, role: e.target.value }))}
-              className="h-9 w-full max-w-xs rounded-lg border border-slate-700 bg-slate-950 px-2 text-sm"
+              disabled={locked}
+              className="h-9 w-full max-w-xs rounded-lg border border-slate-700 bg-slate-950 px-2 text-sm disabled:text-slate-400"
             >
               <option value="admin">{ROLE_LABELS.admin}</option>
               <option value="encargado">{ROLE_LABELS.encargado}</option>
@@ -411,7 +447,8 @@ function UserRowCard({ row, saving, onSave, onToggleActive, onDelete }) {
             <input
               value={draft.label}
               onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))}
-              className="h-9 w-full max-w-xs rounded-lg border border-slate-700 bg-slate-950 px-2 text-sm"
+              disabled={locked}
+              className="h-9 w-full max-w-xs rounded-lg border border-slate-700 bg-slate-950 px-2 text-sm disabled:text-slate-400"
             />
           </label>
           {draft.role === "delivery" ? (
@@ -424,6 +461,7 @@ function UserRowCard({ row, saving, onSave, onToggleActive, onDelete }) {
               />
             </div>
           ) : null}
+          {locked ? null : (
           <label className="block space-y-1">
             <span className="text-xs text-slate-500">Nueva contraseña (opcional)</span>
             <input
@@ -435,6 +473,7 @@ function UserRowCard({ row, saving, onSave, onToggleActive, onDelete }) {
               autoComplete="new-password"
             />
           </label>
+          )}
           <p className="text-[11px] text-slate-500">
             Creado: {row.created_at ? new Date(row.created_at).toLocaleString("es-AR") : "—"}
           </p>
@@ -449,6 +488,8 @@ function UserRowCard({ row, saving, onSave, onToggleActive, onDelete }) {
           >
             {row.is_active ? "Activo" : "Desactivado"}
           </span>
+          {locked ? null : (
+            <>
           <button
             type="button"
             disabled={saving}
@@ -473,6 +514,8 @@ function UserRowCard({ row, saving, onSave, onToggleActive, onDelete }) {
           >
             Eliminar
           </button>
+            </>
+          )}
         </div>
       </div>
     </article>
