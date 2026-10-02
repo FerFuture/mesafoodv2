@@ -3157,15 +3157,17 @@ export default function AdminApp({ onLogout }) {
                   </button>
                 </div>
               </div>
-              <label className="mt-4 block">
-                <span className="sr-only">Buscar productos</span>
+              <label className="mt-4 block rounded-lg border border-slate-600 bg-slate-950/80 p-3">
+                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  Buscar en la lista
+                </span>
                 <input
                   type="search"
                   value={menuSearchQuery}
                   onChange={(e) => setMenuSearchQuery(e.target.value)}
-                  placeholder="Buscar por nombre, categoria, descripcion o precio..."
+                  placeholder="Filtrar por nombre, categoría o precio. No crea productos."
                   autoComplete="off"
-                  className="h-10 w-full rounded-lg border border-slate-600 bg-slate-950 px-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
+                  className="h-10 w-full rounded-full border border-slate-600 bg-slate-900 px-4 text-sm text-slate-100 placeholder:text-slate-500 focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-400/40"
                 />
               </label>
               {menuItems.length > 0 && menuSearchQuery.trim() ? (
@@ -3180,46 +3182,67 @@ export default function AdminApp({ onLogout }) {
             {showAddForm ? (
               <form
                 onSubmit={createMenuItem}
-                className="grid gap-3 rounded-xl border border-slate-700 bg-slate-900 p-4 md:grid-cols-2"
+                className="grid gap-3 rounded-xl border border-emerald-500/50 bg-emerald-950/30 p-4 md:grid-cols-2"
               >
-                <input
-                  value={newItem.name}
-                  onChange={(event) => setNewItem((prev) => ({ ...prev, name: event.target.value }))}
-                  placeholder="Nombre"
-                  className="h-10 rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm"
-                  required
-                />
-                <input
-                  value={newItem.category}
-                  onChange={(event) =>
-                    setNewItem((prev) => ({
-                      ...prev,
-                      category: normalizeMenuCategoryInput(event.target.value)
-                    }))
-                  }
-                  placeholder="CATEGORIA"
-                  className="h-10 rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm"
-                />
-                <input
-                  value={newItem.price}
-                  onChange={(event) => setNewItem((prev) => ({ ...prev, price: event.target.value }))}
-                  placeholder="Precio (ej: 5990.50)"
-                  className="h-10 rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm"
-                  required
-                />
-                <input
-                  value={newItem.description}
-                  onChange={(event) => setNewItem((prev) => ({ ...prev, description: event.target.value }))}
-                  placeholder="Descripcion"
-                  className="h-10 rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm"
-                />
-                <input
-                  value={newItem.stock}
-                  onChange={(event) => setNewItem((prev) => ({ ...prev, stock: event.target.value }))}
-                  placeholder="Stock (vacío = sin límite)"
-                  inputMode="numeric"
-                  className="h-10 rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm"
-                />
+                <div className="md:col-span-2">
+                  <h3 className="text-sm font-semibold text-emerald-200">Nuevo producto</h3>
+                  <p className="mt-1 text-xs text-emerald-100/70">
+                    Completá estos campos para agregarlo al menú. No es el buscador de arriba.
+                  </p>
+                </div>
+                <label className="space-y-1 text-sm">
+                  <span className="text-xs font-medium text-emerald-100/80">Nombre</span>
+                  <input
+                    value={newItem.name}
+                    onChange={(event) => setNewItem((prev) => ({ ...prev, name: event.target.value }))}
+                    placeholder="Ej: Coca Cola"
+                    className="h-10 w-full rounded-lg border border-emerald-500/30 bg-slate-950 px-3 text-sm"
+                    required
+                  />
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className="text-xs font-medium text-emerald-100/80">Categoría</span>
+                  <input
+                    value={newItem.category}
+                    onChange={(event) =>
+                      setNewItem((prev) => ({
+                        ...prev,
+                        category: normalizeMenuCategoryInput(event.target.value)
+                      }))
+                    }
+                    placeholder="Ej: BEBIDAS"
+                    className="h-10 w-full rounded-lg border border-emerald-500/30 bg-slate-950 px-3 text-sm"
+                  />
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className="text-xs font-medium text-emerald-100/80">Precio</span>
+                  <input
+                    value={newItem.price}
+                    onChange={(event) => setNewItem((prev) => ({ ...prev, price: event.target.value }))}
+                    placeholder="Ej: 2500"
+                    className="h-10 w-full rounded-lg border border-emerald-500/30 bg-slate-950 px-3 text-sm"
+                    required
+                  />
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className="text-xs font-medium text-emerald-100/80">Descripción</span>
+                  <input
+                    value={newItem.description}
+                    onChange={(event) => setNewItem((prev) => ({ ...prev, description: event.target.value }))}
+                    placeholder="Opcional"
+                    className="h-10 w-full rounded-lg border border-emerald-500/30 bg-slate-950 px-3 text-sm"
+                  />
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className="text-xs font-medium text-emerald-100/80">Stock</span>
+                  <input
+                    value={newItem.stock}
+                    onChange={(event) => setNewItem((prev) => ({ ...prev, stock: event.target.value }))}
+                    placeholder="Vacío = sin límite"
+                    inputMode="numeric"
+                    className="h-10 w-full rounded-lg border border-emerald-500/30 bg-slate-950 px-3 text-sm"
+                  />
+                </label>
                 <div className="md:col-span-2 flex justify-end gap-2">
                   <button
                     type="button"
