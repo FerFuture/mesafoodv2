@@ -646,9 +646,6 @@ export default function MesaClientApp() {
                           <p className="text-xs text-slate-400">{item.description}</p>
                         ) : null}
                         <p className="text-sm text-emerald-300/90">{currency(item.price)}</p>
-                        {readMenuStock(item) == null ? null : (
-                          <p className="text-xs text-amber-200/80">Quedan {readMenuStock(item)}</p>
-                        )}
                       </div>
                       {viewOnly ? null : (
                       <div className="flex items-center gap-2">

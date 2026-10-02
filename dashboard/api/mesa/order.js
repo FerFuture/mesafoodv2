@@ -7,7 +7,7 @@
  */
 
 import crypto from "crypto";
-import { nextStockPatches, shortageMessage, stockShortage } from "../../src/lib/menuStock.js";
+import { nextStockPatches, stockShortage } from "../../src/lib/menuStock.js";
 
 function readStream(req) {
   return new Promise((resolve, reject) => {
@@ -237,7 +237,8 @@ export default async function handler(req, res) {
     }
     const shortage = stockShortage(menu || [], resolvedItems);
     if (shortage.length) {
-      return res.status(409).json({ error: shortageMessage(shortage) });
+      const names = shortage.map((row) => row.name).join(", ");
+      return res.status(409).json({ error: `No hay más de: ${names}.` });
     }
 
     const botNumber = String(restaurant.whatsapp_number || "").replace(/\D/g, "") || "0";
