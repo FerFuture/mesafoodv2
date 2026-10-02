@@ -3,6 +3,7 @@ import { useParams, useSearchParams, useLocation, matchPath } from "react-router
 import { supabase } from "../supabaseClient";
 import { fetchRestaurantForDashboard } from "../lib/restaurantTenant";
 import { currency } from "../lib/format";
+import { readMenuStock, writeMenuStockTags } from "../lib/menuStock";
 
 function buildCartLines(cartById, menuById) {
   const names = [];
@@ -210,7 +211,7 @@ export default function MesaClientApp() {
       try {
         const { data, error: queryError } = await supabase
           .from("menu_items")
-          .select("id, name, price, category, description")
+          .select("id, name, price, category, description, tags, available")
           .eq("restaurant_id", restaurantId)
           .eq("available", true)
           .order("name", { ascending: true });
@@ -295,10 +296,13 @@ export default function MesaClientApp() {
   }
 
   function addToCart(itemId) {
-    setCartById((prev) => ({
-      ...prev,
-      [itemId]: (prev[itemId] || 0) + 1
-    }));
+    const item = menuById.get(itemId);
+    const stock = readMenuStock(item);
+    setCartById((prev) => {
+      const current = prev[itemId] || 0;
+      if (stock != null && current >= stock) return prev;
+      return { ...prev, [itemId]: current + 1 };
+    });
   }
 
   function removeFromCart(itemId) {
@@ -363,6 +367,18 @@ export default function MesaClientApp() {
         throw new Error(msg);
       }
 
+      setMenuItems((prev) =>
+        prev
+          .map((item) => {
+            const qty = cartById[item.id] || 0;
+            const stock = readMenuStock(item);
+            if (!qty || stock == null) return item;
+            const next = Math.max(0, stock - qty);
+            if (next <= 0) return null;
+            return { ...item, tags: writeMenuStockTags(item.tags, next), available: true };
+          })
+          .filter(Boolean)
+      );
       setCartById({});
       setObservacion("");
       setQrOpen(true);
@@ -630,6 +646,9 @@ export default function MesaClientApp() {
                           <p className="text-xs text-slate-400">{item.description}</p>
                         ) : null}
                         <p className="text-sm text-emerald-300/90">{currency(item.price)}</p>
+                        {readMenuStock(item) == null ? null : (
+                          <p className="text-xs text-amber-200/80">Quedan {readMenuStock(item)}</p>
+                        )}
                       </div>
                       {viewOnly ? null : (
                       <div className="flex items-center gap-2">
@@ -644,7 +663,7 @@ export default function MesaClientApp() {
                         <span className="w-8 text-center tabular-nums text-lg font-semibold">{q}</span>
                         <button
                           type="button"
-                          disabled={submitting || accountClosed}
+                          disabled={submitting || accountClosed || (readMenuStock(item) != null && q >= readMenuStock(item))}
                           onClick={() => addToCart(item.id)}
                           className="h-10 w-10 rounded-lg bg-emerald-600 text-lg font-semibold leading-none text-white hover:bg-emerald-500 disabled:opacity-50"
                         >

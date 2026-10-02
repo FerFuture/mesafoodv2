@@ -50,6 +50,7 @@ import StockManagerPanel from "../components/StockManagerPanel";
 import OrdersDateRangeCalendar from "../components/OrdersDateRangeCalendar";
 import { fetchRestaurantForDashboard } from "../lib/restaurantTenant";
 import { getSession } from "../lib/auth";
+import { applyMenuStock, readMenuStock, shortageMessage, writeMenuStockTags } from "../lib/menuStock";
 import { WEEKDAY_OPTIONS } from "../lib/deliverySchedule";
 
 const CANCEL_REVERT_WINDOW_MS = 30 * 60 * 1000;
@@ -415,11 +416,13 @@ export default function AdminApp({ onLogout }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [menuSearchQuery, setMenuSearchQuery] = useState("");
   const [addingItem, setAddingItem] = useState(false);
+  const [savingMenuBulk, setSavingMenuBulk] = useState(false);
   const [newItem, setNewItem] = useState({
     name: "",
     description: "",
     category: "",
-    price: ""
+    price: "",
+    stock: ""
   });
   const [error, setError] = useState("");
   const [feeDraftByOrder, setFeeDraftByOrder] = useState({});
@@ -1457,6 +1460,12 @@ export default function AdminApp({ onLogout }) {
     setOrders((prev) =>
       prev.map((row) => (row.id === order.id ? { ...row, ...updatedRow } : row))
     );
+    if (restaurantId && Array.isArray(order.items) && order.items.length) {
+      const stockResult = await applyMenuStock(supabase, restaurantId, order.items, "restore");
+      if (!stockResult.ok && !stockResult.shortage) {
+        setError(`El pedido se canceló, pero no se devolvió el stock: ${stockResult.error}`);
+      }
+    }
     setSavingOrderId(null);
   }
 
@@ -1531,6 +1540,12 @@ export default function AdminApp({ onLogout }) {
         setOrders((prev) =>
           prev.map((row) => (row.id === order.id ? { ...row, ...updatedRow } : row))
         );
+        if (restaurantId && Array.isArray(order.items) && order.items.length) {
+          const stockResult = await applyMenuStock(supabase, restaurantId, order.items, "restore");
+          if (!stockResult.ok && !stockResult.shortage) {
+            setError(`El pedido se canceló, pero no se devolvió el stock: ${stockResult.error}`);
+          }
+        }
       }
     } finally {
       setSavingOrderId((cur) => (cur === order.id ? null : cur));
@@ -2030,6 +2045,16 @@ export default function AdminApp({ onLogout }) {
       return;
     }
 
+    const stockRaw = String(newItem.stock || "").trim();
+    let stock = null;
+    if (stockRaw) {
+      stock = Math.floor(Number(stockRaw));
+      if (!Number.isFinite(stock) || stock < 0) {
+        setError("El stock tiene que ser un número entero, o vacío si no querés controlarlo.");
+        return;
+      }
+    }
+
     setAddingItem(true);
     const payload = {
       restaurant_id: restaurantId,
@@ -2037,7 +2062,8 @@ export default function AdminApp({ onLogout }) {
       description: newItem.description.trim() || null,
       category: normalizeMenuCategoryForStorage(newItem.category),
       price,
-      available: true
+      tags: writeMenuStockTags([], stock),
+      available: stock == null || stock > 0
     };
 
     const { data, error: insertError } = await supabase
@@ -2056,7 +2082,7 @@ export default function AdminApp({ onLogout }) {
       ...prev,
       { ...data, category: normalizeMenuCategoryForStorage(data.category) }
     ]);
-    setNewItem({ name: "", description: "", category: "", price: "" });
+    setNewItem({ name: "", description: "", category: "", price: "", stock: "" });
     setShowAddForm(false);
     setAddingItem(false);
   }
@@ -2072,6 +2098,66 @@ export default function AdminApp({ onLogout }) {
 
     setMenuItems((prev) => prev.filter((item) => item.id !== itemId));
     setSavingItemId(null);
+  }
+
+  async function saveItemStock(item, raw) {
+    const trimmed = String(raw || "").trim();
+    const current = readMenuStock(item);
+    if (!trimmed) {
+      if (current == null) return;
+      await updateMenuItem(item.id, { tags: writeMenuStockTags(item.tags, null) });
+      return;
+    }
+    const qty = Math.floor(Number(trimmed));
+    if (!Number.isFinite(qty) || qty < 0) {
+      setError("El stock tiene que ser un número entero, o vacío si no querés controlarlo.");
+      return;
+    }
+    if (current === qty) return;
+    await updateMenuItem(item.id, {
+      tags: writeMenuStockTags(item.tags, qty),
+      available: qty > 0
+    });
+  }
+
+  async function setAllMenuAvailability(available) {
+    const targets = available
+      ? menuItems.filter((item) => {
+          const stock = readMenuStock(item);
+          return stock == null || stock > 0;
+        })
+      : menuItems;
+    if (!targets.length) {
+      setError(available ? "No hay productos con stock para marcar como disponibles." : "No hay productos en el menú.");
+      return;
+    }
+    const confirmed = window.confirm(
+      available
+        ? "¿Marcar como disponible todo lo que tenga stock?"
+        : "¿Marcar todo el menú como agotado?"
+    );
+    if (!confirmed) return;
+    setError("");
+    setSavingMenuBulk(true);
+    const ids = targets.map((item) => item.id);
+    for (let index = 0; index < ids.length; index += 40) {
+      const chunk = ids.slice(index, index + 40);
+      const { error: updateError } = await supabase
+        .from("menu_items")
+        .update({ available })
+        .in("id", chunk)
+        .eq("restaurant_id", restaurantId);
+      if (updateError) {
+        setError(`No se pudo actualizar el menú: ${updateError.message}`);
+        setSavingMenuBulk(false);
+        return;
+      }
+    }
+    const targetIds = new Set(ids);
+    setMenuItems((prev) =>
+      prev.map((item) => (targetIds.has(item.id) ? { ...item, available } : item))
+    );
+    setSavingMenuBulk(false);
   }
 
   return (
@@ -3043,15 +3129,33 @@ export default function AdminApp({ onLogout }) {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <h2 className="text-sm font-semibold text-slate-200">Productos del menu</h2>
-                  <p className="text-xs text-slate-400">Administra precios, disponibilidad y alta de productos.</p>
+                  <p className="text-xs text-slate-400">Administra precios, stock y si está disponible.</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowAddForm((prev) => !prev)}
-                  className="shrink-0 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-slate-950"
-                >
-                  Añadir Producto
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={savingMenuBulk || menuItems.length === 0}
+                    onClick={() => setAllMenuAvailability(false)}
+                    className="shrink-0 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/20 disabled:opacity-50"
+                  >
+                    Agotar todo
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingMenuBulk || menuItems.length === 0}
+                    onClick={() => setAllMenuAvailability(true)}
+                    className="shrink-0 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
+                  >
+                    Disponible todo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddForm((prev) => !prev)}
+                    className="shrink-0 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-slate-950"
+                  >
+                    Añadir Producto
+                  </button>
+                </div>
               </div>
               <label className="mt-4 block">
                 <span className="sr-only">Buscar productos</span>
@@ -3109,6 +3213,13 @@ export default function AdminApp({ onLogout }) {
                   placeholder="Descripcion"
                   className="h-10 rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm"
                 />
+                <input
+                  value={newItem.stock}
+                  onChange={(event) => setNewItem((prev) => ({ ...prev, stock: event.target.value }))}
+                  placeholder="Stock (vacío = sin límite)"
+                  inputMode="numeric"
+                  className="h-10 rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm"
+                />
                 <div className="md:col-span-2 flex justify-end gap-2">
                   <button
                     type="button"
@@ -3153,6 +3264,11 @@ export default function AdminApp({ onLogout }) {
                         {normalizeMenuCategoryForStorage(item.category) || "Sin categoria"}
                       </p>
                       <p className="mt-1 text-xs text-slate-500">{item.description || "Sin descripcion"}</p>
+                      <p className="mt-1 text-xs text-amber-200/80">
+                        {readMenuStock(item) == null
+                          ? "Sin control de stock"
+                          : `Stock: ${readMenuStock(item)}`}
+                      </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <button
@@ -3174,10 +3290,26 @@ export default function AdminApp({ onLogout }) {
                           })
                         }
                       />
+                      <input
+                        key={`${item.id}-${readMenuStock(item) ?? "libre"}`}
+                        type="number"
+                        min="0"
+                        title="Cantidad en stock. Vacío = sin límite."
+                        placeholder="Stock"
+                        defaultValue={readMenuStock(item) ?? ""}
+                        className="h-10 w-24 rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm"
+                        onBlur={(event) => saveItemStock(item, event.target.value)}
+                      />
                       <button
                         type="button"
                         disabled={savingItemId === item.id}
-                        onClick={() => updateMenuItem(item.id, { available: !item.available })}
+                        onClick={() => {
+                          if (!item.available && readMenuStock(item) === 0) {
+                            setError("Este producto está en 0. Cargá un stock mayor para volver a venderlo.");
+                            return;
+                          }
+                          updateMenuItem(item.id, { available: !item.available });
+                        }}
                         className={`h-10 rounded-lg px-3 text-sm font-semibold transition ${
                           item.available
                             ? "bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30"

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 import { getSession } from "../lib/auth";
 import { fetchRestaurantForDashboard } from "../lib/restaurantTenant";
+import { applyMenuStock, readMenuStock, shortageMessage } from "../lib/menuStock";
 import { liveMesaTables, requestBillPrint, setMesaQrLive } from "../lib/mesaQrLive";
 import {
   currency,
@@ -213,7 +214,7 @@ export default function WaiterApp({ onLogout }) {
     async function loadMenu() {
       const { data, error: queryError } = await supabase
         .from("menu_items")
-        .select("id, name, price, category, description")
+        .select("id, name, price, category, description, tags, available")
         .eq("restaurant_id", restaurantId)
         .eq("available", true)
         .order("name", { ascending: true });
@@ -369,10 +370,13 @@ export default function WaiterApp({ onLogout }) {
   }
 
   function addToCart(itemId) {
-    setCartById((prev) => ({
-      ...prev,
-      [itemId]: (prev[itemId] || 0) + 1
-    }));
+    const item = menuById.get(itemId);
+    const stock = readMenuStock(item);
+    setCartById((prev) => {
+      const current = prev[itemId] || 0;
+      if (stock != null && current >= stock) return prev;
+      return { ...prev, [itemId]: current + 1 };
+    });
   }
 
   function removeFromCart(itemId) {
@@ -430,6 +434,16 @@ export default function WaiterApp({ onLogout }) {
     }
 
     setSubmitting(true);
+    const stockResult = await applyMenuStock(supabase, restaurantId, cartLines, "consume");
+    if (!stockResult.ok) {
+      setError(
+        stockResult.shortage
+          ? shortageMessage(stockResult.shortage)
+          : `No se pudo descontar el stock: ${stockResult.error}`
+      );
+      setSubmitting(false);
+      return;
+    }
     let { data, error: insErr } = await supabase.from("orders").insert(row).select("*").single();
 
     if (insErr && /table_number/i.test(insErr.message || "")) {
@@ -448,9 +462,23 @@ export default function WaiterApp({ onLogout }) {
     }
 
     if (insErr) {
+      await applyMenuStock(supabase, restaurantId, cartLines, "restore");
       setError(`No se pudo crear el pedido: ${insErr.message}`);
       setSubmitting(false);
       return;
+    }
+
+    if (stockResult.patches?.length) {
+      const patched = new Map(stockResult.patches.map((patch) => [patch.id, patch]));
+      setMenuItems((prev) =>
+        prev
+          .map((item) => {
+            const patch = patched.get(item.id);
+            if (!patch) return item;
+            return patch.available ? { ...item, tags: patch.tags, available: true } : null;
+          })
+          .filter(Boolean)
+      );
     }
 
     if (data) {
@@ -1225,6 +1253,9 @@ export default function WaiterApp({ onLogout }) {
                           <div className="min-w-0 flex-1">
                             <p className="font-medium text-slate-100 lg:text-lg">{item.name}</p>
                             <p className="text-sm text-emerald-300/90 lg:text-base">{currency(item.price)}</p>
+                            {readMenuStock(item) == null ? null : (
+                              <p className="text-xs text-amber-200/80">Quedan {readMenuStock(item)}</p>
+                            )}
                           </div>
                           <div className="flex items-center gap-2">
                             <button
@@ -1238,8 +1269,9 @@ export default function WaiterApp({ onLogout }) {
                             <span className="w-8 text-center tabular-nums text-lg font-semibold">{q}</span>
                             <button
                               type="button"
+                              disabled={readMenuStock(item) != null && q >= readMenuStock(item)}
                               onClick={() => addToCart(item.id)}
-                              className="h-10 w-10 rounded-lg bg-emerald-600 text-lg font-semibold leading-none text-white hover:bg-emerald-500"
+                              className="h-10 w-10 rounded-lg bg-emerald-600 text-lg font-semibold leading-none text-white hover:bg-emerald-500 disabled:opacity-50"
                             >
                               +
                             </button>

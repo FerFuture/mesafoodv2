@@ -7,6 +7,7 @@
  */
 
 import crypto from "crypto";
+import { nextStockPatches, shortageMessage, stockShortage } from "../../src/lib/menuStock.js";
 
 function readStream(req) {
   return new Promise((resolve, reject) => {
@@ -211,7 +212,7 @@ export default async function handler(req, res) {
     }
 
     const menu = await supabaseFetch(
-      `menu_items?restaurant_id=eq.${encodeURIComponent(restaurantId)}&available=eq.true&select=name,price`
+      `menu_items?restaurant_id=eq.${encodeURIComponent(restaurantId)}&available=eq.true&select=id,name,price,tags,available`
     );
     const menuByName = new Map();
     for (const item of menu || []) {
@@ -233,6 +234,10 @@ export default async function handler(req, res) {
     totalAmount = Math.round(totalAmount * 100) / 100;
     if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
       return res.status(400).json({ error: "Total inválido" });
+    }
+    const shortage = stockShortage(menu || [], resolvedItems);
+    if (shortage.length) {
+      return res.status(409).json({ error: shortageMessage(shortage) });
     }
 
     const botNumber = String(restaurant.whatsapp_number || "").replace(/\D/g, "") || "0";
@@ -259,6 +264,13 @@ export default async function handler(req, res) {
       body: orderRow
     });
     const order = Array.isArray(created) ? created[0] : created;
+    const patches = nextStockPatches(menu || [], resolvedItems, "consume");
+    for (const patch of patches) {
+      await supabaseFetch(`menu_items?id=eq.${encodeURIComponent(patch.id)}`, {
+        method: "PATCH",
+        body: { tags: patch.tags, available: patch.available }
+      });
+    }
     return res.status(200).json({ orderId: order?.id || null });
   } catch (error) {
     const status = Number(error?.status) || 500;
