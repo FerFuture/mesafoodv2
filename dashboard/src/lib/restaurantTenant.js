@@ -1,3 +1,5 @@
+import { getSession } from "./auth";
+
 /** Igual que `database.js`: solo dígitos para comparar WhatsApp. */
 export function whatsappDigits(raw) {
   return String(raw ?? "").replace(/\D/g, "");
@@ -67,8 +69,7 @@ export async function fetchRestaurantForDashboard(supabase) {
 
   let sessionRestaurantId = "";
   try {
-    const raw = localStorage.getItem("restobot_session_v1");
-    const parsed = raw ? JSON.parse(raw) : null;
+    const parsed = getSession();
     if (parsed?.role && parsed.role !== "owner" && parsed.restaurantId) {
       sessionRestaurantId = String(parsed.restaurantId);
     }

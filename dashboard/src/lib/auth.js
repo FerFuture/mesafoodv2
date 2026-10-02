@@ -6,6 +6,8 @@ import {
 } from "./deliverySchedule";
 
 const SESSION_KEY = "restobot_session_v1";
+/** Cada pestaña conserva su sesión. Así cocina y encargado pueden estar abiertos juntos. */
+const TAB_SESSION_KEY = "restobot_tab_session_v1";
 export const SESSION_REVALIDATE_MS = 120_000;
 
 /** Roles que pueden guardarse en sesión (incluye maestro: solo login por env, no alta en BD). */
@@ -44,21 +46,42 @@ function verifyPasswordLocal(password, passwordHash) {
   }
 }
 
+function parseSession(raw) {
+  if (!raw) return null;
+  const parsed = JSON.parse(raw);
+  if (!parsed || !SESSION_ROLES.includes(parsed.role)) return null;
+  return parsed;
+}
+
 export function getSession() {
   try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || !SESSION_ROLES.includes(parsed.role)) return null;
-    return parsed;
+    const tabSession = parseSession(sessionStorage.getItem(TAB_SESSION_KEY));
+    if (tabSession) return tabSession;
+  } catch {
+    // sessionStorage puede fallar en modos restringidos del navegador.
+  }
+  try {
+    const shared = parseSession(localStorage.getItem(SESSION_KEY));
+    if (!shared) return null;
+    try {
+      sessionStorage.setItem(TAB_SESSION_KEY, JSON.stringify(shared));
+    } catch {
+      // Si no se puede fijar la pestaña, igual devolvemos la sesión compartida.
+    }
+    return shared;
   } catch {
     return null;
   }
 }
 
 function saveSession(session) {
+  const raw = JSON.stringify(session);
   try {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    sessionStorage.setItem(TAB_SESSION_KEY, raw);
+  } catch {
+  }
+  try {
+    localStorage.setItem(SESSION_KEY, raw);
   } catch {
   }
 }
@@ -287,6 +310,10 @@ export async function login(p) {
 }
 
 export function logout() {
+  try {
+    sessionStorage.removeItem(TAB_SESSION_KEY);
+  } catch {
+  }
   try {
     localStorage.removeItem(SESSION_KEY);
   } catch {
