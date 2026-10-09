@@ -226,6 +226,19 @@ async function loginWithOwner(username, password) {
   return { ok: true, session };
 }
 
+/** Confirma la contraseña del usuario de control que está en esta pestaña. */
+export async function verifyOwnerPassword(password) {
+  const session = getSession();
+  const username = String(session?.username || "").trim().toLowerCase();
+  if (session?.role !== "owner" || !username) {
+    return { ok: false, error: "Entrá de nuevo con tu usuario de control." };
+  }
+  const result = await loginWithOwner(username, password);
+  if (result.ok) return { ok: true };
+  if (result.missingUser) return { ok: false, error: "No se encontró tu usuario de control." };
+  return { ok: false, error: result.error || "La contraseña no coincide." };
+}
+
 async function loginWithTableUser(username, password) {
   const norm = normalizeUsername(username);
   if (!norm) {

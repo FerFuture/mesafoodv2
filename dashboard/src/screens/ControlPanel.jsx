@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import bcrypt from "bcryptjs";
 import { supabase } from "../supabaseClient";
+import { verifyOwnerPassword } from "../lib/auth";
 
 const USERNAME_RE = /^[a-z0-9._-]{3,40}$/;
 
@@ -25,7 +26,7 @@ export default function ControlPanel({ onLogout, username = "" }) {
   const [draft, setDraft] = useState(emptyLocal);
   const [savingLocal, setSavingLocal] = useState(false);
   const [busyId, setBusyId] = useState("");
-  const [deleteDraft, setDeleteDraft] = useState({ id: "", name: "" });
+  const [deleteDraft, setDeleteDraft] = useState({ id: "", name: "", password: "" });
   const [userDrafts, setUserDrafts] = useState({});
 
   const load = useCallback(async () => {
@@ -114,16 +115,26 @@ export default function ControlPanel({ onLogout, username = "" }) {
       setError(`Para borrar, escribí el nombre exacto: ${row.name}`);
       return;
     }
+    if (!String(deleteDraft.password || "").trim()) {
+      setError("Escribí la contraseña de tu usuario de control.");
+      return;
+    }
     setError("");
     setNotice("");
     setBusyId(row.id);
+    const passwordCheck = await verifyOwnerPassword(deleteDraft.password);
+    if (!passwordCheck.ok) {
+      setBusyId("");
+      setError(passwordCheck.error || "La contraseña no coincide.");
+      return;
+    }
     const { error: deleteError } = await supabase.from("restaurants").delete().eq("id", row.id);
     setBusyId("");
     if (deleteError) {
       setError(deleteError.message);
       return;
     }
-    setDeleteDraft({ id: "", name: "" });
+    setDeleteDraft({ id: "", name: "", password: "" });
     setNotice(`${row.name} y sus datos se borraron. Los otros locales no se tocaron.`);
     await load();
   }
@@ -289,7 +300,9 @@ export default function ControlPanel({ onLogout, username = "" }) {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setDeleteDraft(deleting ? { id: "", name: "" } : { id: row.id, name: "" })}
+                    onClick={() =>
+                      setDeleteDraft(deleting ? { id: "", name: "", password: "" } : { id: row.id, name: "", password: "" })
+                    }
                     className="rounded-lg border border-rose-500/40 px-3 py-2 text-sm text-rose-200 hover:bg-rose-500/10"
                   >
                     Borrar
@@ -299,11 +312,20 @@ export default function ControlPanel({ onLogout, username = "" }) {
                 {deleting ? (
                   <div className="mt-3 space-y-2 rounded-xl border border-rose-500/30 bg-rose-500/5 p-3">
                     <p className="text-sm text-rose-100">
-                      Se borran la carta, los pedidos y los usuarios de este local. Escribí <strong>{row.name}</strong> para confirmar.
+                      Se borran la carta, los pedidos y los usuarios de este local. Escribí <strong>{row.name}</strong> y la contraseña de tu usuario de control{username ? ` (${username})` : ""}.
                     </p>
                     <input
                       value={deleteDraft.name}
-                      onChange={(event) => setDeleteDraft({ id: row.id, name: event.target.value })}
+                      onChange={(event) => setDeleteDraft({ id: row.id, name: event.target.value, password: deleteDraft.password })}
+                      placeholder="Nombre del local"
+                      className="h-10 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm"
+                    />
+                    <input
+                      type="password"
+                      value={deleteDraft.password}
+                      onChange={(event) => setDeleteDraft({ id: row.id, name: deleteDraft.name, password: event.target.value })}
+                      placeholder="Contraseña de control"
+                      autoComplete="current-password"
                       className="h-10 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm"
                     />
                     <button
