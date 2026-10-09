@@ -4,7 +4,14 @@ import { supabase } from "../supabaseClient";
 import { fetchRestaurantForDashboard } from "../lib/restaurantTenant";
 import { currency } from "../lib/format";
 import { readMenuStock, writeMenuStockTags } from "../lib/menuStock";
-import { readMenuImage } from "../lib/menuImage";
+import "./../components/carta/carta.css";
+import { COPY } from "../components/carta/copy";
+import { categoryDomId, dishMarks, displayDishName, formatMenuPrice } from "../components/carta/cartaFormat";
+import CartaHeader, { CartaFrame, CartaNotice } from "../components/carta/CartaHeader";
+import CategoryNav from "../components/carta/CategoryNav";
+import DishCard from "../components/carta/DishCard";
+import DishModal from "../components/carta/DishModal";
+import CartaFooter, { WhatsappFab } from "../components/carta/CartaFooter";
 
 function buildCartLines(cartById, menuById) {
   const names = [];
@@ -117,6 +124,28 @@ export default function MesaClientApp() {
 
   const [confirmDialog, setConfirmDialog] = useState(null);
   const confirmResolverRef = useRef(null);
+  const headerRef = useRef(null);
+  const navRef = useRef(null);
+  const rootRef = useRef(null);
+  const [place, setPlace] = useState({ address: "", openingHours: "", whatsapp: "" });
+  const [selectedId, setSelectedId] = useState("");
+  const [activeCategory, setActiveCategory] = useState("");
+  const [dietFilter, setDietFilter] = useState("");
+  const [theme, setTheme] = useState(() => {
+    try {
+      return localStorage.getItem("carta_theme_v1") === "light" ? "light" : "dark";
+    } catch {
+      return "dark";
+    }
+  });
+  const [lang, setLang] = useState(() => {
+    try {
+      return localStorage.getItem("carta_lang_v1") === "en" ? "en" : "es";
+    } catch {
+      return "es";
+    }
+  });
+  const copy = COPY[lang] || COPY.es;
 
   const visibleMenuItems = useMemo(
     () =>
@@ -137,22 +166,27 @@ export default function MesaClientApp() {
 
   const menuItemsFiltered = useMemo(() => {
     const raw = String(menuSearchQuery || "").trim().toLowerCase();
-    if (!raw) return visibleMenuItems;
-
-    const words = raw.split(/\s+/).filter(Boolean);
+    const words = raw ? raw.split(/\s+/).filter(Boolean) : [];
     return visibleMenuItems.filter((item) => {
-      const haystack = [
-        item.name,
-        item.category,
-        item.description,
-        item.price != null ? String(item.price) : ""
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return words.every((word) => haystack.includes(word));
+      if (words.length) {
+        const haystack = [item.name, item.category, item.description, item.price != null ? String(item.price) : ""]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        if (!words.every((word) => haystack.includes(word))) return false;
+      }
+      if (dietFilter && !dishMarks(item).includes(dietFilter)) return false;
+      return true;
     });
-  }, [menuSearchQuery, visibleMenuItems]);
+  }, [menuSearchQuery, visibleMenuItems, dietFilter]);
+
+  const dietOptions = useMemo(() => {
+    const found = new Set();
+    for (const item of visibleMenuItems) {
+      for (const mark of dishMarks(item)) found.add(mark);
+    }
+    return ["vegetariano", "sintacc", "picante"].filter((id) => found.has(id));
+  }, [visibleMenuItems]);
 
   const groupedMenu = useMemo(() => groupMenuByCategory(menuItemsFiltered), [menuItemsFiltered]);
   const mesaBlocked = parsedTableNumber != null && blockedTables.includes(parsedTableNumber);
@@ -185,6 +219,23 @@ export default function MesaClientApp() {
         }
         setRestaurantId(data.id);
         setRestaurantName(data.name || "");
+        try {
+          const { data: extra, error: extraError } = await supabase
+            .from("restaurants")
+            .select("public_name, address, opening_hours, whatsapp_number")
+            .eq("id", data.id)
+            .maybeSingle();
+          if (!extraError && extra) {
+            if (extra.public_name) setRestaurantName(extra.public_name);
+            setPlace({
+              address: extra.address || "",
+              openingHours: extra.opening_hours || "",
+              whatsapp: String(extra.whatsapp_number || "").replace(/\D/g, "")
+            });
+          }
+        } catch {
+          /* La carta se muestra igual si no se puede leer el pie. */
+        }
 
         const metadataObj =
           data?.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata)
@@ -274,6 +325,86 @@ export default function MesaClientApp() {
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     };
   }, [toast]);
+
+  useEffect(() => {
+    const prev = document.title;
+    document.title = restaurantName ? `${restaurantName} · Carta` : "Carta";
+    return () => {
+      document.title = prev;
+    };
+  }, [restaurantName]);
+
+  useEffect(() => {
+    const names = groupedMenu.map(([category]) => category);
+    if (!names.length) return undefined;
+    function onScroll() {
+      const line = (headerRef.current?.offsetHeight || 0) + (navRef.current?.offsetHeight || 0) + 8;
+      let current = names[0];
+      for (const name of names) {
+        const el = document.getElementById(categoryDomId(name));
+        if (el && el.getBoundingClientRect().top <= line) current = name;
+      }
+      setActiveCategory(current);
+    }
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [groupedMenu]);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return undefined;
+    const apply = () => {
+      const headerH = headerRef.current?.offsetHeight || 0;
+      const navH = navRef.current?.offsetHeight || 0;
+      root.style.setProperty("--header", `${headerH}px`);
+      root.style.setProperty("--offset", `${headerH + navH + 8}px`);
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    if (headerRef.current) observer.observe(headerRef.current);
+    if (navRef.current) observer.observe(navRef.current);
+    return () => observer.disconnect();
+  }, [loading, groupedMenu.length, restaurantName]);
+
+  useEffect(() => {
+    const main = document.getElementById("carta-main");
+    if (!main) return undefined;
+    if (selectedId) main.setAttribute("inert", "");
+    else main.removeAttribute("inert");
+    return () => main.removeAttribute("inert");
+  }, [selectedId]);
+
+  function toggleTheme() {
+    setTheme((prev) => {
+      const next = prev === "light" ? "dark" : "light";
+      try {
+        localStorage.setItem("carta_theme_v1", next);
+      } catch {
+        /* La preferencia queda solo en esta visita. */
+      }
+      return next;
+    });
+  }
+
+  function toggleLang() {
+    setLang((prev) => {
+      const next = prev === "es" ? "en" : "es";
+      try {
+        localStorage.setItem("carta_lang_v1", next);
+      } catch {
+        /* La preferencia queda solo en esta visita. */
+      }
+      return next;
+    });
+  }
+
+  function scrollToCategory(category) {
+    const el = document.getElementById(categoryDomId(category));
+    if (!el) return;
+    setActiveCategory(category);
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   function requestConfirm({
     title = "Confirmar acción",
@@ -485,269 +616,260 @@ export default function MesaClientApp() {
 
   if (parsedTableNumber == null && !viewOnly) {
     return (
-      <div className="dark min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/60 p-6 text-center">
-          <p className="text-lg font-semibold text-slate-100">
-            {cartaRoute ? "Falta el enlace de tu mesa" : "Mesa inválida"}
-          </p>
-          <p className="mt-2 text-sm text-slate-400">
-            {cartaRoute
-              ? "Para ver la carta y pedir con el número de mesa correcto, escaneá el código QR que está en la mesa (o abrí el enlace completo que incluye mesa y token)."
-              : "El número de mesa en la dirección no es válido."}
-          </p>
-        </div>
-      </div>
+      <CartaNotice theme={theme} lang={lang} title={cartaRoute ? "Falta el enlace de tu mesa" : "Mesa inválida"}>
+        {cartaRoute
+          ? "Para ver la carta y pedir con el número de mesa correcto, escaneá el código QR que está en la mesa (o abrí el enlace completo que incluye mesa y token)."
+          : "El número de mesa en la dirección no es válido."}
+      </CartaNotice>
     );
   }
 
   if (loading) {
     return (
-      <div className="dark min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
-        <p className="text-sm text-slate-300">Cargando…</p>
-      </div>
+      <CartaFrame theme={theme} lang={lang}>
+        <div className="mx-auto w-full max-w-[1100px] space-y-3 px-4 py-6">
+          <p className="sr-only">{copy.loading}</p>
+          {[0, 1, 2, 3].map((item) => (
+            <div key={item} className="h-28 animate-pulse rounded-2xl bg-[var(--surface)]" />
+          ))}
+        </div>
+      </CartaFrame>
     );
   }
 
   if (!mesaEnabled && !viewOnly) {
     return (
-      <div className="dark min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/60 p-6 text-center">
-          <p className="text-lg font-semibold text-slate-100">Pedido en mesa deshabilitado</p>
-          <p className="mt-2 text-sm text-slate-400">
-            El módulo de carta QR está desactivado. Consultá con el personal.
-          </p>
-        </div>
-      </div>
+      <CartaNotice theme={theme} lang={lang} title="Pedido en mesa deshabilitado">
+        El módulo de carta QR está desactivado. Consultá con el personal.
+      </CartaNotice>
     );
   }
 
   if (!viewOnly && MESA_QR_TOKEN_REQUIRED && !mesaTokenFromUrl) {
     return (
-      <div className="dark min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-2xl border border-amber-500/35 bg-slate-900/60 p-6 text-center">
-          <p className="text-lg font-semibold text-amber-100">Enlace incompleto</p>
-          <p className="mt-2 text-sm text-slate-400">
-            Abrí este panel escaneando el código QR de tu mesa (no uses solo el número en la URL).
-          </p>
-        </div>
-      </div>
+      <CartaNotice theme={theme} lang={lang} title="Enlace incompleto">
+        Abrí este panel escaneando el código QR de tu mesa (no uses solo el número en la URL).
+      </CartaNotice>
     );
   }
 
   if (!viewOnly && mesaBlocked) {
     return (
-      <div className="dark min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-2xl border border-rose-500/35 bg-slate-900/60 p-6 text-center">
-          <p className="text-lg font-semibold text-rose-100">Mesa bloqueada</p>
-          <p className="mt-2 text-sm text-slate-300">
-            La mesa {parsedTableNumber} no está habilitada para recibir pedidos desde la carta QR.
-          </p>
-          <p className="mt-2 text-sm text-slate-400">Consultá con el personal para habilitarla nuevamente.</p>
-        </div>
-      </div>
+      <CartaNotice theme={theme} lang={lang} title="Mesa bloqueada">
+        La mesa {parsedTableNumber} no está habilitada para recibir pedidos desde la carta QR. Consultá con el personal para habilitarla nuevamente.
+      </CartaNotice>
     );
   }
 
+  const selectedItem = selectedId ? menuById.get(selectedId) || null : null;
+  const categories = groupedMenu.map(([category]) => category);
+  const headerName = restaurantName || "Restaurante";
+  const headerSubtitle = viewOnly
+    ? place.openingHours
+      ? `${copy.carta} · ${place.openingHours}`
+      : copy.carta
+    : `${copy.mesa} ${parsedTableNumber} · ${copy.carta}`;
+
   return (
-    <div className="dark min-h-screen bg-slate-950 text-slate-100">
-      <header className="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/95 backdrop-blur">
-        <div className="mx-auto max-w-3xl px-4 py-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h1 className="text-lg font-semibold text-white">{restaurantName || "Restaurante"}</h1>
-              <p className="text-xs text-slate-400">
-                {viewOnly ? "Carta" : `Pedido para la mesa ${parsedTableNumber}`}
-              </p>
+    <CartaFrame ref={rootRef} theme={theme} lang={lang}>
+      <div id="carta-main">
+      <CartaHeader
+        headerRef={headerRef}
+        name={headerName}
+        subtitle={headerSubtitle}
+        theme={theme}
+        lang={lang}
+        copy={copy}
+        onToggleTheme={toggleTheme}
+        onToggleLang={toggleLang}
+      />
+      <CategoryNav
+        navRef={navRef}
+        categories={categories}
+        active={activeCategory}
+        onSelect={scrollToCategory}
+        copy={copy}
+      />
+      <main className={viewOnly ? "" : "pb-28"}>
+        <div className="mx-auto w-full max-w-[1100px] space-y-4 px-4 pt-4">
+          {!viewOnly && !qrOpen && !accountClosed ? (
+            <div className="rounded-2xl bg-amber-500/15 px-3 py-3 text-sm text-[var(--text)]" role="status">
+              Esta mesa no está habilitada. Pedile al mozo que la habilite y después volvé a enviar el pedido.
             </div>
-            {viewOnly ? null : (
-            <div className="text-right">
-              <p className="text-xs text-slate-500">Total</p>
-              <p className="text-lg font-bold tabular-nums text-emerald-200">{currency(totalAmount)}</p>
+          ) : null}
+          {visitError && !accountClosed ? (
+            <div className="rounded-2xl bg-rose-500/15 px-3 py-3 text-sm" role="alert">
+              {visitError}
             </div>
-            )}
-          </div>
-        </div>
-      </header>
+          ) : null}
+          {accountClosed ? (
+            <div className="rounded-2xl bg-amber-500/15 px-3 py-3 text-sm" role="status">
+              La cuenta de esta mesa ya se cerró. Desde este celular no se puede seguir pidiendo. Si seguís en la mesa, escaneá el QR otra vez.
+            </div>
+          ) : null}
+          {error ? (
+            <div className="rounded-2xl bg-rose-500/15 px-3 py-3 text-sm" role="alert">
+              {error}
+            </div>
+          ) : null}
 
-      <main className="mx-auto max-w-3xl px-4 py-5 space-y-5">
-        {!viewOnly && !qrOpen && !accountClosed ? (
-          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-3 text-sm text-amber-100" role="status">
-            Esta mesa no está habilitada. Pedile al mozo que la habilite y después volvé a enviar el pedido.
-          </div>
-        ) : null}
+          {visibleMenuItems.length > 0 ? (
+            <div className="space-y-3">
+              <label className="block">
+                <span className="sr-only">{copy.search}</span>
+                <input
+                  type="search"
+                  value={menuSearchQuery}
+                  onChange={(e) => setMenuSearchQuery(e.target.value)}
+                  placeholder={copy.search}
+                  autoComplete="off"
+                  className="h-11 w-full rounded-full bg-[var(--surface)] px-4 text-sm text-[var(--text)] outline-none placeholder:text-[var(--muted)]"
+                />
+              </label>
+              {dietOptions.length ? (
+                <div className="flex flex-wrap gap-2" role="group" aria-label={copy.filters}>
+                  {dietOptions.map((id) => {
+                    const on = dietFilter === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => setDietFilter(on ? "" : id)}
+                        className={`h-11 rounded-full px-4 text-sm font-medium ${
+                          on ? "bg-[var(--accent)] text-[var(--accent-ink)]" : "bg-[var(--surface)] text-[var(--muted)]"
+                        }`}
+                      >
+                        {copy[id]}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {menuSearchQuery.trim() || dietFilter ? (
+                <p className="text-xs text-[var(--muted)]">
+                  {menuItemsFiltered.length} / {visibleMenuItems.length} {copy.products}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
 
-        {visitError && !accountClosed ? (
-          <div className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-sm text-rose-200" role="alert">
-            {visitError}
-          </div>
-        ) : null}
+          {visibleMenuItems.length > 0 && menuItemsFiltered.length === 0 ? (
+            <p className="rounded-2xl bg-[var(--surface)] px-4 py-6 text-center text-sm text-[var(--muted)]">{copy.noMatch}</p>
+          ) : null}
+          {menuItems.length > 0 && visibleMenuItems.length === 0 ? (
+            <p className="rounded-2xl bg-[var(--surface)] px-4 py-6 text-center text-sm text-[var(--muted)]">{copy.empty}</p>
+          ) : null}
 
-        {accountClosed ? (
-          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-3 text-sm text-amber-100" role="status">
-            La cuenta de esta mesa ya se cerró. Desde este celular no se puede seguir pidiendo. Si seguís en la mesa, escaneá el QR otra vez.
-          </div>
-        ) : null}
-
-        {error ? (
-          <div className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-sm text-rose-200" role="alert">
-            {error}
-          </div>
-        ) : null}
-
-        {visibleMenuItems.length > 0 ? (
-          <section className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-            <label className="block">
-              <span className="sr-only">Buscar productos</span>
-              <input
-                type="search"
-                value={menuSearchQuery}
-                onChange={(e) => setMenuSearchQuery(e.target.value)}
-                placeholder="Buscar por nombre, categoria, descripcion o precio..."
-                autoComplete="off"
-                className="h-10 w-full rounded-lg border border-slate-600 bg-slate-950 px-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
-              />
-            </label>
-            {menuSearchQuery.trim() ? (
-              <p className="text-xs text-slate-500">
-                {menuItemsFiltered.length === visibleMenuItems.length
-                  ? `${visibleMenuItems.length} productos`
-                  : `${menuItemsFiltered.length} de ${visibleMenuItems.length} productos`}
-              </p>
-            ) : null}
-          </section>
-        ) : null}
-
-        {visibleMenuItems.length > 0 && menuItemsFiltered.length === 0 ? (
-          <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 text-center text-slate-300">
-            No hay productos que coincidan con &quot;{menuSearchQuery.trim()}&quot;.
-          </div>
-        ) : null}
-
-        {menuItems.length > 0 && visibleMenuItems.length === 0 ? (
-          <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 text-center text-slate-300">
-            No hay productos disponibles para mostrar en la carta de mesa.
-          </div>
-        ) : null}
-
-        <section className="space-y-5">
           {groupedMenu.map(([category, items]) => (
-            <div key={category} className="space-y-2">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">{category}</h2>
-              <div className="space-y-2">
-                {items.map((item) => {
-                  const q = cartById[item.id] || 0;
+            <section key={category} id={categoryDomId(category)} className="carta-section space-y-3 pt-4">
+              <div className="flex items-center gap-3">
+                <h2 className="carta-serif text-2xl font-semibold">{displayDishName(category)}</h2>
+                <span className="h-px flex-1 bg-gradient-to-r from-[var(--accent)]/70 to-transparent" aria-hidden="true" />
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {items.map((item, index) => {
+                  const qty = cartById[item.id] || 0;
+                  const stock = readMenuStock(item);
                   return (
-                    <div
+                    <DishCard
                       key={item.id}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-700/80 bg-slate-900/40 px-3 py-2"
-                    >
-                      <div className="flex min-w-0 flex-1 items-center gap-3">
-                        {readMenuImage(item) ? (
-                          <img
-                            src={readMenuImage(item)}
-                            alt=""
-                            className="h-20 w-20 shrink-0 rounded-lg object-cover"
-                          />
-                        ) : null}
-                        <div className="min-w-0">
-                        <p className="font-medium text-slate-100">{item.name}</p>
-                        {item.description ? (
-                          <p className="text-xs text-slate-400">{item.description}</p>
-                        ) : null}
-                        <p className="text-sm text-emerald-300/90">{currency(item.price)}</p>
-                        </div>
-                      </div>
-                      {viewOnly ? null : (
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          disabled={q < 1 || submitting || accountClosed}
-                          onClick={() => removeFromCart(item.id)}
-                          className="h-10 w-10 rounded-lg border border-slate-600 text-lg leading-none text-slate-300 hover:bg-slate-800 disabled:opacity-30"
-                        >
-                          −
-                        </button>
-                        <span className="w-8 text-center tabular-nums text-lg font-semibold">{q}</span>
-                        <button
-                          type="button"
-                          disabled={submitting || accountClosed || (readMenuStock(item) != null && q >= readMenuStock(item))}
-                          onClick={() => addToCart(item.id)}
-                          className="h-10 w-10 rounded-lg bg-emerald-600 text-lg font-semibold leading-none text-white hover:bg-emerald-500 disabled:opacity-50"
-                        >
-                          +
-                        </button>
-                      </div>
-                      )}
-                    </div>
+                      item={item}
+                      index={index}
+                      qty={qty}
+                      viewOnly={viewOnly}
+                      canAdd={stock == null || qty < stock}
+                      disabled={submitting || accountClosed}
+                      onOpen={setSelectedId}
+                      onAdd={addToCart}
+                      onRemove={removeFromCart}
+                      copy={copy}
+                    />
                   );
                 })}
               </div>
-            </div>
+            </section>
           ))}
-        </section>
 
-        {viewOnly ? null : (
-        <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-4">
-          <label className="block text-xs font-medium uppercase tracking-wider text-slate-400">
-            Observación <span className="normal-case tracking-normal text-slate-500">(opcional)</span>
-          </label>
-          <textarea
-            value={observacion}
-            onChange={(e) => setObservacion(e.target.value)}
-            rows={2}
-            maxLength={400}
-            disabled={submitting}
-            placeholder="Ej: sin mayonesa, sin cebolla, bien cocido…"
-            className="mt-2 w-full resize-y rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-500 focus:border-emerald-500/50 disabled:opacity-50"
-          />
+          {viewOnly ? null : (
+            <label className="block pt-2">
+              <span className="text-xs font-medium uppercase tracking-wider text-[var(--muted)]">
+                {copy.note} <span className="normal-case tracking-normal">({copy.noteHint})</span>
+              </span>
+              <textarea
+                value={observacion}
+                onChange={(e) => setObservacion(e.target.value)}
+                rows={2}
+                maxLength={400}
+                disabled={submitting}
+                placeholder={copy.notePh}
+                className="mt-2 w-full resize-y rounded-2xl bg-[var(--surface)] px-3 py-3 text-sm text-[var(--text)] outline-none placeholder:text-[var(--muted)] disabled:opacity-50"
+              />
+            </label>
+          )}
         </div>
-        )}
+        <CartaFooter
+          name={headerName}
+          address={place.address}
+          openingHours={place.openingHours}
+          whatsapp={place.whatsapp}
+          copy={copy}
+        />
+      </main>
 
-        {viewOnly ? null : (
-        <div className="sticky bottom-0 border-t border-slate-800 bg-slate-950/95 py-4 backdrop-blur">
-          <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/20 px-4 py-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-xs text-slate-400">Ítems</p>
-                <p className="text-sm text-slate-200">{cartLines.length} producto(s)</p>
-              </div>
-
-              <div className="flex flex-wrap gap-2 items-center">
-                <button
-                  type="button"
-                  disabled={submitting || accountClosed || cartLines.length === 0 || !visit?.visitToken}
-                  onClick={() => submitOrder()}
-                  className="rounded-lg bg-emerald-500 px-6 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
-                >
-                  {submitting ? "Enviando…" : "Enviar a cocina"}
-                </button>
-              </div>
+      {viewOnly ? null : (
+        <div className="carta-orderbar fixed inset-x-0 bottom-0 z-20 bg-[var(--bg)]/95 px-4 py-3 backdrop-blur" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
+          <div className="mx-auto flex w-full max-w-[1100px] items-center gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] text-[var(--muted)]">{copy.inOrder}</p>
+              <p className="text-lg font-semibold tabular-nums text-[var(--accent)]">{formatMenuPrice(totalAmount)}</p>
             </div>
-
+            <button
+              type="button"
+              disabled={submitting || accountClosed || cartLines.length === 0 || !visit?.visitToken}
+              onClick={() => submitOrder()}
+              className="h-12 min-w-[44px] flex-1 rounded-full bg-[var(--accent)] px-4 text-sm font-semibold text-[var(--accent-ink)] disabled:opacity-40"
+            >
+              {submitting ? copy.sending : copy.send}
+            </button>
           </div>
         </div>
-        )}
-      </main>
+      )}
+
+      <WhatsappFab whatsapp={place.whatsapp} copy={copy} lifted={!viewOnly} />
+      </div>
+
+      {selectedItem ? (
+        <DishModal
+          item={selectedItem}
+          qty={cartById[selectedItem.id] || 0}
+          viewOnly={viewOnly}
+          canAdd={readMenuStock(selectedItem) == null || (cartById[selectedItem.id] || 0) < readMenuStock(selectedItem)}
+          disabled={submitting || accountClosed}
+          onAdd={addToCart}
+          onRemove={removeFromCart}
+          onClose={() => setSelectedId("")}
+          copy={copy}
+        />
+      ) : null}
 
       {toast ? (
         <div
-          className="pointer-events-none fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 px-4"
+          className="pointer-events-none fixed left-1/2 z-[60] -translate-x-1/2 px-4"
+          style={{ bottom: viewOnly ? "calc(env(safe-area-inset-bottom) + 5rem)" : "calc(env(safe-area-inset-bottom) + 6.5rem)" }}
           role="status"
           aria-live="polite"
         >
-          <div className="pointer-events-none rounded-full border border-emerald-500/35 bg-emerald-950/90 px-4 py-2 text-center text-sm font-medium text-emerald-100 shadow-lg shadow-emerald-950/30 backdrop-blur-sm">
+          <div className="rounded-full bg-[var(--surface)] px-4 py-2 text-center text-sm font-medium text-[var(--text)] shadow-[var(--shadow)]">
             {toast}
           </div>
         </div>
       ) : null}
 
-      {confirmDialog ? (
-        <ConfirmModal dialog={confirmDialog} onResolve={handleConfirmDialog} />
-      ) : null}
-    </div>
+      {confirmDialog ? <ConfirmModal dialog={confirmDialog} onResolve={handleConfirmDialog} /> : null}
+    </CartaFrame>
   );
 }
-
 const CONFIRM_TONE_PALETTE = {
   danger: {
     accent: "border-rose-500/40",
@@ -780,7 +902,7 @@ function ConfirmModal({ dialog, onResolve }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center px-4"
+      className="fixed inset-0 z-[70] flex items-center justify-center px-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="mesa-client-confirm-title"
