@@ -4,6 +4,7 @@ import { supabase } from "../supabaseClient";
 import { fetchRestaurantForDashboard } from "../lib/restaurantTenant";
 import { currency } from "../lib/format";
 import { readMenuStock, writeMenuStockTags } from "../lib/menuStock";
+import { readMenuImage } from "../lib/menuImage";
 
 function buildCartLines(cartById, menuById) {
   const names = [];
@@ -640,12 +641,21 @@ export default function MesaClientApp() {
                       key={item.id}
                       className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-700/80 bg-slate-900/40 px-3 py-2"
                     >
-                      <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 flex-1 items-center gap-3">
+                        {readMenuImage(item) ? (
+                          <img
+                            src={readMenuImage(item)}
+                            alt=""
+                            className="h-20 w-20 shrink-0 rounded-lg object-cover"
+                          />
+                        ) : null}
+                        <div className="min-w-0">
                         <p className="font-medium text-slate-100">{item.name}</p>
                         {item.description ? (
                           <p className="text-xs text-slate-400">{item.description}</p>
                         ) : null}
                         <p className="text-sm text-emerald-300/90">{currency(item.price)}</p>
+                        </div>
                       </div>
                       {viewOnly ? null : (
                       <div className="flex items-center gap-2">

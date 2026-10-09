@@ -51,6 +51,7 @@ import OrdersDateRangeCalendar from "../components/OrdersDateRangeCalendar";
 import { fetchRestaurantForDashboard } from "../lib/restaurantTenant";
 import { getSession } from "../lib/auth";
 import { applyMenuStock, readMenuStock, shortageMessage, writeMenuStockTags } from "../lib/menuStock";
+import { compressMenuImage, readMenuImage, writeMenuImageTags } from "../lib/menuImage";
 import { WEEKDAY_OPTIONS } from "../lib/deliverySchedule";
 
 const CANCEL_REVERT_WINDOW_MS = 30 * 60 * 1000;
@@ -2120,6 +2121,24 @@ export default function AdminApp({ onLogout }) {
     });
   }
 
+  async function saveItemImage(item, file) {
+    if (!file) return;
+    setError("");
+    setSavingItemId(item.id);
+    try {
+      const dataUrl = await compressMenuImage(file);
+      await updateMenuItem(item.id, { tags: writeMenuImageTags(item.tags, dataUrl) });
+    } catch (imageError) {
+      setError(imageError?.message || "No se pudo guardar la foto.");
+      setSavingItemId(null);
+    }
+  }
+
+  async function removeItemImage(item) {
+    setError("");
+    await updateMenuItem(item.id, { tags: writeMenuImageTags(item.tags, "") });
+  }
+
   async function setAllMenuAvailability(available) {
     const targets = available
       ? menuItems.filter((item) => {
@@ -3291,6 +3310,38 @@ export default function AdminApp({ onLogout }) {
                         {readMenuStock(item) == null
                           ? "Sin control de stock"
                           : `Stock: ${readMenuStock(item)}`}
+                      </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="text-xs text-slate-400">
+                          {readMenuImage(item) ? "Foto lista para el QR" : "Sin foto en el QR"}
+                        </span>
+                        <label className="cursor-pointer rounded-lg border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800">
+                          {readMenuImage(item) ? "Cambiar foto" : "Elegir foto"}
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            className="hidden"
+                            disabled={savingItemId === item.id}
+                            onChange={(event) => {
+                              const file = event.target.files?.[0];
+                              event.target.value = "";
+                              if (file) saveItemImage(item, file);
+                            }}
+                          />
+                        </label>
+                        {readMenuImage(item) ? (
+                          <button
+                            type="button"
+                            disabled={savingItemId === item.id}
+                            onClick={() => removeItemImage(item)}
+                            className="rounded-lg border border-slate-600 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+                          >
+                            Quitar foto
+                          </button>
+                        ) : null}
+                      </div>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        La foto solo la ve el cliente que abre el QR.
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
